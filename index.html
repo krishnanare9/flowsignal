@@ -29,6 +29,10 @@ ul{list-style:none;padding:0;margin:12px 0}li{padding:5px 0}.yes{color:var(--up)
 canvas{width:100%;height:clamp(320px,45vw,470px);display:block}figcaption,footer{font-size:13px}
 input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0} [hidden]{display:none!important}
 @media(max-width:650px){.grid,.lessons{grid-template-columns:1fr}.status{width:100%;margin:0}article,figure{padding:12px}}
+.overview{margin-bottom:12px}#frames{display:grid;grid-template-columns:repeat(auto-fit,minmax(105px,1fr));gap:6px;margin-top:10px}
+#frames button{display:flex;align-items:center;justify-content:space-between;padding:8px;gap:4px}
+#frames button[aria-pressed=true]{border-color:var(--gold);background:#302a18}
+#frames small{font:600 11px ui-monospace,monospace}
 </style>
 </head>
 <body><main>
@@ -38,8 +42,9 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
 <label>Market<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
-<label>Timeframe<select id="interval"><option>1m</option><option selected>5m</option><option>15m</option><option>1h</option></select></label>
+<label>Timeframe<select id="interval"></select></label>
 <button id="refresh">↻ Refresh</button><span class="status" id="status" role="status">Loading…</span></div>
+<article class="overview"><div class="heading"><h2>All timeframes</h2><small>Select a timeframe to open its chart</small></div><div id="frames"></div></article>
 <div class="grid"><article><h2>Closed-candle signal</h2><div id="verdict">—</div><p id="summary" class="muted"></p>
 <table><thead><tr><th>Level</th><th>Price · USDT</th><th>R:R</th></tr></thead><tbody id="levels"></tbody></table></article>
 <article><h2>Conditions</h2><p class="muted" id="scores"></p><ul id="checks"></ul></article></div>
@@ -68,7 +73,31 @@ const $ = id => document.getElementById(id);
 const sum = values => values.reduce((a,b) => a+b,0);
 const price = n => n.toLocaleString("en-US",{maximumSignificantDigits:9});
 const colors = {up:"#65d5a0",down:"#ff817a",gold:"#d4af37",dim:"#b8b3a4"};
-let snapshot = null, generation = 0, busy = false;
+const intervals="1s 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M".split(" ");
+const results=new Map(), buttons=new Map();
+let snapshot=null, generation=0, busy=false;
+function selectFrame() {
+  const selected=$("interval").value;
+  const item=results.get(selected);
+  snapshot=item?.data ?? null;
+  $("status").textContent=item?.error || (item ? "Live • "+item.time : "Loading…");
+  for (const [frame,button] of buttons) button.setAttribute("aria-pressed",String(frame===selected));
+  render();
+}
+for (const frame of intervals) {
+  const name=frame==="1M"?"1 month":frame;
+  $("interval").add(new Option(name,frame,false,frame==="5m"));
+  const button=document.createElement("button"), badge=document.createElement("small");
+  button.append(name,badge);
+  button.onclick=()=>{ $("interval").value=frame; selectFrame(); };
+  $("frames").append(button); buttons.set(frame,button);
+}
+function paintFrame(frame) {
+  const item=results.get(frame), badge=buttons.get(frame).lastElementChild;
+  const state=item?.error?"Offline":item?.data?.a?.label || (item?"N/A":"…");
+  badge.textContent=state;
+  badge.style.color=({BUY:colors.up,SELL:colors.down,WATCH:colors.gold})[state] || colors.dim;
+}
 
 function candle(row) {
   const fields = [0,1,2,3,4,5,6,9].map(i =>
@@ -190,23 +219,30 @@ function render() {
 
 async function run(reset=false) {
   if (busy && !reset) return;
-  const id=++generation, symbol=$("symbol").value, interval=$("interval").value;
+  const id=++generation, symbol=$("symbol").value, selected=$("interval").value;
   busy=true;
-  if (reset) { snapshot=null; render(); }
-  $("status").textContent="Refreshing…";
-  try {
-    const candles=await load(symbol,interval);
-    if (id!==generation) return;
-    // The forming candle is visible but never enters the profile or signal.
-    const closed=candles.slice(0,-1), p=profile(closed);
-    snapshot={symbol,candles,closed,p,a:analyse(closed,p)};
-    $("status").textContent="Live • "+new Date().toLocaleTimeString();
-  } catch (error) {
-    if (id!==generation) return;
-    snapshot=null; $("status").textContent=error.message;
-  } finally {
-    if (id===generation) { busy=false; render(); }
+  if (reset) results.clear();
+  intervals.forEach(paintFrame);
+  selectFrame();
+  const queue=[selected,...intervals.filter(frame=>frame!==selected)];
+  // Bound concurrency. A market change invalidates older workers.
+  async function worker() {
+    while (id===generation && queue.length) {
+      const frame=queue.shift();
+      let item;
+      try {
+        const candles=await load(symbol,frame), closed=candles.slice(0,-1);
+        const p=profile(closed);
+        item={time:new Date().toLocaleTimeString(),data:{symbol,candles,closed,p,a:analyse(closed,p)}};
+      } catch (error) { item={error:error.message}; }
+      if (id!==generation) return;
+      results.set(frame,item);
+      paintFrame(frame);
+      if (frame===$("interval").value) selectFrame();
+    }
   }
+  try { await Promise.all(Array.from({length:4},worker)); }
+  finally { if (id===generation) busy=false; }
 }
 
 function draw() {
@@ -259,7 +295,10 @@ function draw() {
       last=Math.max(yy,last+13); label(name+" "+Number(value.toPrecision(7)),right+2,last+3,ink);
     }
   }
-  const time=c=>new Date(c.time).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  const frame=$("interval").value;
+  const dateOptions=frame==="1M"?{month:"short",year:"2-digit"}:{day:"numeric",month:"short"};
+  const time=c=>/[dwM]$/.test(frame)?new Date(c.time).toLocaleDateString([],dateOptions):
+    new Date(c.time).toLocaleTimeString([],frame==="1s"?{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"}:{hour:"2-digit",minute:"2-digit"});
   label(time(visible[0]),2,h-3,colors.dim);
   label(time(visible.at(-1)),Math.max(56,plot-58),h-3,colors.dim);
 }
@@ -271,7 +310,8 @@ function view(learn) {
   if (!learn) draw();
 }
 $("scanTab").onclick=()=>view(false); $("learnTab").onclick=()=>view(true);
-$("symbol").onchange=$("interval").onchange=()=>run(true);
+$("symbol").onchange=()=>run(true);
+$("interval").onchange=selectFrame;
 $("refresh").onclick=()=>run();
 $("capital").oninput=$("risk").oninput=calculate;
 new ResizeObserver(draw).observe($("chart"));
