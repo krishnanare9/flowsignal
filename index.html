@@ -51,6 +51,15 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <button id="scanTab" aria-controls="scanner" aria-pressed="true">Scanner</button>
 <button id="flowTab" aria-controls="flow" aria-pressed="false">Trading Chart</button>
 <button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
+<details id="paperPanel"><summary><strong>Paper bot · USDT futures</strong></summary>
+<article><div class="controls"><label>Contract<select id="botPair"></select></label><label>Signal timeframe<select id="botFrame"></select></label>
+<label>Starting balance (USDT)<input id="botCapital" type="number" min="0.01" step="any" value="1000"></label>
+<label>Risk per trade (%)<input id="botRisk" type="number" min="0.01" max="1" step="0.01" value="1"></label>
+<button id="botStart">Start paper bot</button><button id="botPause">Pause entries</button></div>
+<p id="botState" role="status"></p><p id="botEquity"></p><p id="botOpen"></p>
+<details><summary>Execution rules</summary><p>BUY/SELL on a newly closed candle (4/5 or 5/5). Entry is simulated at the next candle open. Stop uses the scanner level. Exit fully at POC if it offers ≥1.5R, otherwise at the VA edge if it qualifies. One position at a time. Maximum three entries or three losses per IST day.</p>
+<p>Prices are futures contract prices. Candle simulation assumes stop first when both exits are touched. Gaps can increase losses. P&amp;L excludes fees, funding and slippage. Keep this page open for new entries. Saved positions reconcile against available candle history after reopening.</p></details>
+<h3>Paper trade history</h3><div class="scroll"><table><thead><tr><th>Entry (IST)</th><th>Contract / TF</th><th>Side</th><th>Entry</th><th>SL</th><th>Target</th><th>Coins</th><th>R:R</th><th>Exit</th><th>P&L (USDT)</th></tr></thead><tbody id="botHistory"></tbody></table></div></article></details>
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
 <label>USDⓈ-M perpetual contract<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
@@ -932,6 +941,116 @@ $("refresh").onclick=()=>run();
 $("capital").oninput=$("risk").oninput=calculate;
 new ResizeObserver(draw).observe($("chart"));
 window.addEventListener("resize",draw);
+
+// Simulated USDT-linear positions. A cross-tab lock serializes ledger writes.
+const paperKey="flowsignal.paper.v1";
+const istDay=t=>new Date(t+19800000).toISOString().slice(0,10);
+const paperTime=t=>new Date(t).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
+function readPaper(){return JSON.parse(localStorage.getItem(paperKey)||"null");}
+function savePaper(b){localStorage.setItem(paperKey,JSON.stringify(b));}
+function paperOrder(a,entry,b){
+  if(!a||!["BUY","SELL"].includes(a.label)||!(entry>0))return null;
+  const sign=a.buy?1:-1, distance=sign*(entry-a.stop);
+  if(!(distance>0)||!(b.balance>0))return null;
+  const target=[a.tp1,a.tp2].find(t=>sign*(t-entry)/distance>=1.5);
+  if(!Number.isFinite(target))return null;
+  const qty=b.balance*(b.risk/100)/distance;
+  if(!Number.isFinite(qty)||qty<=0)return null;
+  return {entry,stop:a.stop,target,qty,rr:sign*(target-entry)/distance,sign};
+}
+function paperExit(p,c){
+  const long=p.sign===1;
+  if(long?c.open<=p.stop:c.open>=p.stop)return [c.open,"SL gap"];
+  if(long?c.open>=p.target:c.open<=p.target)return [p.target,"TP"];
+  if(long?c.low<=p.stop:c.high>=p.stop)return [p.stop,"SL"];
+  if(long?c.high>=p.target:c.low<=p.target)return [p.target,"TP"];
+  return null;
+}
+function settlePaper(b,bar){
+  const p=b.open, hit=paperExit(p,bar);
+  if(!hit)return false;
+  const [exit,reason]=hit, pnl=p.sign*(exit-p.entry)*p.qty;
+  // OHLC gives the bar, not the exact fill time. Use bar end (or observation time for a forming bar).
+  b.history.unshift({...p,exit,reason,pnl,lossDay:istDay(Math.min(bar.end,Date.now()))});
+  b.last=Math.max(b.last,p.time,bar.time);b.balance+=pnl;b.open=null;return true;
+}
+async function paperBars(b){
+  // Resume an older position from its last inspected candle before processing live signals.
+  if(b.open){
+    const q=new URLSearchParams({symbol:b.pair,interval:b.frame,startTime:b.open.cursor,limit:300});
+    const res=await fetch(FUT[0]+"/fapi/v1/klines?"+q,{cache:"no-store",signal:AbortSignal.timeout(8000)});
+    if(!res.ok)throw Error("Futures history unavailable");
+    const rows=(await res.json()).map(candle);
+    if(!rows.length||rows[0].time!==b.open.cursor)throw Error("Missing candle history; position reconciliation pending");
+    let expected=b.open.cursor;
+    for(const c of rows){
+      if(c.time!==expected)throw Error("Gap in futures history");
+      if(settlePaper(b,c))break;
+      b.open.cursor=c.time;expected=c.end+1;
+    }
+    if(b.open&&rows.length===300&&rows.at(-1).end<Date.now())b.open.cursor=expected;
+    b.note=b.open?"Monitoring SL and target.":"Paper position closed.";
+    return;
+  }
+  if(!b.active)return;
+  const rows=await load(b.pair,b.frame), live=rows.at(-1),closed=rows.slice(0,-1),last=closed.at(-1);
+  const now=Date.now();
+  if(live.time!==last.end+1||now<live.time||now>live.end||live.time<=b.since||live.time<=b.last)return;
+  b.last=live.time;
+  if(now-live.time>45000){b.note="Skipped late signal. Waiting for next close.";return;}
+  const day=istDay(live.time);
+  if(b.history.filter(t=>istDay(t.time)===day).length>=3||b.history.filter(t=>t.lossDay===day&&t.pnl<0).length>=3){
+    b.note="Daily cap reached (IST).";return;
+  }
+  const a=analyse(closed,profile(closed)),order=paperOrder(a,live.open,b);
+  if(!order){b.note="Last close: "+(a?.label||"WAIT")+" · no qualifying entry.";return;}
+  b.open={...order,pair:b.pair,frame:b.frame,time:live.time,cursor:live.time};
+  b.note="Paper position opened.";
+  if(settlePaper(b,live))b.note="Paper position opened and closed within entry candle.";
+}
+function showPaper(b){
+  const frozen=!!(b?.active||b?.open);
+  $("botStart").disabled=frozen;$("botPause").disabled=!b?.active;
+  const ids=["botPair","botFrame","botRisk","botCapital"];
+  ids.forEach((id,i)=>$(id).disabled=frozen||(i===3&&!!b));
+  if(b){
+    $("botCapital").value=b.seed;
+    if(frozen){$("botPair").value=b.pair;$("botFrame").value=b.frame;$("botRisk").value=b.risk;}
+  }
+  $("botState").textContent=(b?.active?"Running":b?.open?"Entries paused · managing position":"Stopped")+" · "+(b?.note||"Choose a contract and start.");
+  $("botEquity").textContent=b?"Realized balance "+price(b.balance)+" USDT · closed P&L "+price(b.balance-b.seed)+" USDT":"";
+  const p=b?.open;
+  $("botOpen").textContent=p?[p.pair,p.frame,p.sign===1?"LONG":"SHORT","Entry "+price(p.entry),"SL "+price(p.stop),"TP "+price(p.target),price(p.qty)+" coins","1:"+p.rr.toFixed(2)].join(" · "):"No open paper position.";
+  const body=$("botHistory");body.replaceChildren();
+  for(const t of (b?.history||[]).slice(0,100)){
+    const tr=body.insertRow();
+    for(const v of [paperTime(t.time),t.pair+" / "+t.frame,t.sign===1?"LONG":"SHORT",price(t.entry),price(t.stop),price(t.target),price(t.qty),"1:"+t.rr.toFixed(2),t.reason+" "+price(t.exit),price(t.pnl)])tr.insertCell().textContent=v;
+  }
+}
+async function paperAction(mode){
+  try{
+    if(!navigator.locks)throw Error("Open via HTTPS to use the paper ledger");
+    await navigator.locks.request(paperKey,{ifAvailable:mode==="tick"},async lock=>{
+      if(!lock)return;
+      let b=readPaper();
+      if(mode==="start"&&!b?.active&&!b?.open){
+        const seed=b?.seed??$("botCapital").valueAsNumber,risk=$("botRisk").valueAsNumber;
+        if(!(Number.isFinite(seed)&&seed>0&&risk>0&&risk<=1))throw Error("Enter positive capital and risk up to 1%");
+        b??={seed,balance:seed,history:[],open:null};
+        Object.assign(b,{active:true,pair:$("botPair").value,frame:$("botFrame").value,risk,since:Date.now(),last:0,note:"Waiting for next closed candle."});
+      }else if(mode==="pause"&&b){b.active=false;b.note=b.open?"Open trade still managed.":"Entries paused.";}
+      else if(mode==="tick"&&(b?.active||b?.open)){await paperBars(b);}
+      else {showPaper(b);return;}
+      savePaper(b);showPaper(b);
+    });
+  }catch(e){$("botState").textContent="Paper bot · "+e.message+". Check data or browser storage.";}
+}
+$("botPair").innerHTML=$("symbol").innerHTML;$("botFrame").innerHTML=$("interval").innerHTML;$("botFrame").value="5m";
+$("botStart").onclick=()=>paperAction("start");$("botPause").onclick=()=>paperAction("pause");
+function refreshPaper(){try{showPaper(readPaper());}catch(e){$("botState").textContent=e.message;}}
+window.addEventListener("storage",e=>{if(e.key===paperKey)refreshPaper();});
+refreshPaper();paperAction("tick");setInterval(()=>paperAction("tick"),10000);
+
 render(); run();$("period").value="1m";$("flowTab").click(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
 </script></body></html>
 
