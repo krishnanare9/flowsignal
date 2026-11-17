@@ -450,12 +450,21 @@ function okxInterval(tf){
 }
 async function okxHistory(f){
   const tf=$("period").value,id=++desk.serial;
-  if(tf==="8h"){f.historyError="OKX does not provide 8h candles. Select 4h or 12h.";paintDesk();return;}
+  const requestFrame=tf==="8h"?"4h":tf;
   try{
-    const rows=await okxData(f,"market/candles?"+new URLSearchParams({instId:f.inst,bar:okxInterval(tf),limit:300}));
+    const rows=await okxData(f,"market/candles?"+new URLSearchParams({instId:f.inst,bar:okxInterval(requestFrame),limit:300}));
     if(feed!==f||id!==desk.serial)return;
     f.ohlc=rows.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],
       volume:+k[6],delta:NaN,end:endOf(+k[0],tf)-1})).sort((a,b)=>a.time-b.time);
+    if(tf==="8h"){
+      const grouped=new Map();
+      for(const bar of f.ohlc){
+        const time=bucket(bar.time,"8h"),old=grouped.get(time);
+        if(old){old.high=Math.max(old.high,bar.high);old.low=Math.min(old.low,bar.low);old.close=bar.close;old.volume+=bar.volume;}
+        else grouped.set(time,{...bar,time,end:endOf(time,"8h")-1});
+      }
+      f.ohlc=[...grouped.values()];
+    }
     f.historyError="";updateSeries(f);
   }catch(e){if(feed===f){f.historyError=e.message;paintDesk();}}
 }
@@ -465,6 +474,7 @@ async function startOKX(){
     trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
     wire:"Loading OKX trades",force:"Unavailable on fallback",bookTime:0,quotes:{},ohlc:[],started:Date.now()};
   desk.series=[];desk.profileTrades=[];desk.marks=[];resetViewport();
+  desk.foot=false;desk.count=80;$("ct").setAttribute("aria-pressed","true");$("ft").setAttribute("aria-pressed","false");
   $("venue").innerHTML='<option>OKX · USDT perpetual fallback</option>';
   $("barPick").replaceChildren();
   $("connectionDetails").hidden=false;
