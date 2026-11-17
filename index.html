@@ -51,18 +51,9 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <button id="scanTab" aria-controls="scanner" aria-pressed="true">Scanner</button>
 <button id="flowTab" aria-controls="flow" aria-pressed="false">Trading Chart</button>
 <button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
-<details id="paperPanel"><summary><strong>Paper bot · USDT futures</strong></summary>
-<article><div class="controls"><label>Contract<select id="botPair"></select></label><label>Signal timeframe<select id="botFrame"></select></label>
-<label>Starting balance (USDT)<input id="botCapital" type="number" min="0.01" step="any" value="1000"></label>
-<label>Risk per trade (%)<input id="botRisk" type="number" min="0.01" max="1" step="0.01" value="1"></label>
-<button id="botStart">Start paper bot</button><button id="botPause">Pause entries</button></div>
-<p id="botState" role="status"></p><p id="botEquity"></p><p id="botOpen"></p>
-<details><summary>Execution rules</summary><p>BUY/SELL on a newly closed candle (4/5 or 5/5). Entry is simulated at the next candle open. Stop uses the scanner level. Exit fully at POC if it offers ≥1.5R, otherwise at the VA edge if it qualifies. One position at a time. Maximum three entries or three losses per IST day.</p>
-<p>Prices are futures contract prices. Candle simulation assumes stop first when both exits are touched. Gaps can increase losses. P&amp;L excludes fees, funding and slippage. Keep this page open for new entries. Saved positions reconcile against available candle history after reopening.</p></details>
-<h3>Paper trade history</h3><div class="scroll"><table><thead><tr><th>Entry (IST)</th><th>Contract / TF</th><th>Side</th><th>Entry</th><th>SL</th><th>Target</th><th>Coins</th><th>R:R</th><th>Exit</th><th>P&L (USDT)</th></tr></thead><tbody id="botHistory"></tbody></table></div></article></details>
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
-<label>USDⓈ-M perpetual contract<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
+<label>Market<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
 <label>Timeframe<select id="interval"></select></label>
 <button id="refresh">↻ Refresh</button><span class="status" id="status" role="status">Loading…</span></div>
 <article class="overview"><div class="heading"><h2>All timeframes</h2><small>Select a timeframe to open its chart</small></div><div id="frames"></div></article>
@@ -78,14 +69,14 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <output id="size"></output><p><small>Uses stop distance and assumes 1 USDT ≈ $1. Excludes fees and slippage.</small></p></article>
 </section>
 <section id="flow" hidden aria-label="Order flow">
-<div class="controls"><label>Binance market<select id="venue" disabled><option value="perp">USDⓈ-M perpetual</option></select></label>
+<div class="controls"><label>Binance market<select id="venue"><option value="spot">Spot</option><option value="perp">USDⓈ-M perpetual</option></select></label>
 <label>Symbol<select id="pair"></select></label><label>Interval<select id="period"></select></label>
 <label>Price row<select id="rowSize"><option value="0">Auto</option><option>0.0001</option><option>0.001</option><option>0.01</option><option>0.1</option><option>1</option><option>10</option><option>100</option></select></label></div>
 <figure id="terminal">
 <div class="chartTools"><strong id="marketTitle">Trading chart</strong><div class="switch"><button id="ct">Candles</button><button id="ft" aria-pressed="true">Footprint</button></div><details id="studies"><summary>Indicators</summary><div id="layers"></div></details><button id="expand">Expand</button></div>
-<div class="chartTools"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">−</button><button id="latest">Latest</button><button id="retryFeed">Reconnect data</button><button id="connectionReport">Connection report</button><button id="fit">Reset view</button><button id="level">Draw level</button><button id="trend">Trendline</button><button id="erase">Clear drawings</button><small id="scale"></small></div>
+<div class="chartTools"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">−</button><button id="latest">Latest</button><button id="fit">Reset view</button><button id="level">Draw level</button><button id="trend">Trendline</button><button id="erase">Clear drawings</button><small id="scale"></small></div>
 <output id="ohlc">Connecting…</output><canvas id="plot" tabindex="0" role="img" aria-label="Interactive price chart with footprint candles, liquidity heatmap and indicators"></canvas><figcaption id="chartNote"></figcaption><small>Wheel or pinch to zoom · drag to pan · drag price axis to scale · hover to inspect a row</small></figure>
-<pre id="connectionDetails" hidden style="white-space:pre-wrap;overflow-wrap:anywhere" role="status"></pre><p id="coverage" class="muted" role="status"></p>
+<p id="coverage" class="muted" role="status"></p>
 <article><div class="heading"><h2>Footprint</h2><label>Candle<select id="barPick"></select></label></div><p id="barStats"></p><div id="ladder" class="scroll"></div>
 <small>Bid = aggressive sells · Ask = aggressive buys · Diagonal imbalance ≥ 3× against a nonzero adjacent row. Contiguous runs of 3+ flag potential support or resistance.</small><p id="zones"></p></article>
 <div class="grid">
@@ -94,11 +85,11 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <article><h2>Order book / DOM</h2><p id="bookStamp"></p><div id="dom"></div><small>Top 10 bids and asks by price. Quantity in base coins.</small></article>
 <article><h2>Resting liquidity heatmap</h2><p id="depthCaption"></p><div id="depthMap"></div><small>Top 20 levels per side sampled about every 5s. Green = bids, red = asks. Brighter cells show larger visible quantities.</small></article>
 <article><h2>Time &amp; sales</h2><div id="tape"></div></article>
-<article><h2>Power trades</h2><div class="controls"><label>Minimum print (USDT)<input type="number" value="50000" min="1" id="minPrint"></label></div><div id="power"></div><small>Trade prints from the chart exchange. Data coverage depends on stream or polling availability.</small></article>
+<article><h2>Power trades</h2><div class="controls"><label>Minimum print (USDT)<input type="number" value="50000" min="1" id="minPrint"></label></div><div id="power"></div><small>Binance aggregate trade prints. One print can include several fills.</small></article>
 <article><h2>Perpetual funding &amp; open interest</h2><p id="fstats"></p><div id="oiMap"></div><div id="fundHistory" class="scroll"></div><small>Binance USDⓈ-M mark and funding. History panels identify the exchange; Bybit linear history or observed OKX swap OI can appear as labeled. OI heatmap shows open contracts over time. Funding history shows settled rates.</small></article>
 <article><h2>Reported liquidations</h2><p id="liqStatus"></p><div id="liqMap"></div><div id="liqTape"></div><small>Binance USDⓈ-M publishes sampled forced-order snapshots. Heatmap shows reported fills by time and price. Future liquidation levels are unknown.</small></article>
 <article><h2>Hypothetical leverage levels</h2><label>Assumed leverage<select id="leverage"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label><div id="scenario"></div><small>Illustration using each 5m perpetual close as an assumed entry. Green = assumed long, red = assumed short. Distance = entry / leverage. Brightness uses candle volume as a proxy. Actual positions, margin mode, fees and maintenance margin are unknown. These are simplified bankruptcy levels.</small></article>
-<article><h2>Exchange comparison</h2><div id="quotes"></div><p id="daily"></p><small>Last traded prices for USDT perpetual contracts. Quotes are sampled independently.</small></article>
+<article><h2>Exchange comparison</h2><div id="quotes"></div><p id="daily"></p><small>Spot last prices. Coinbase uses USD, Binance and Bybit use USDT. Quotes are sampled independently.</small></article>
 <article><h2>Market alert</h2><div class="controls"><label>Metric<select id="metric"><option value="price">Trade price</option><option value="volume">Print volume (coins)</option><option value="funding">Perpetual funding (%)</option></select></label><label>Direction<select id="alertSide"><option>Above</option><option>Below</option></select></label><label>Threshold<input type="number" step="any" id="alertPrice"></label><button id="arm">Set alert</button></div><output id="alertMsg" role="status"></output><small>One-shot alert while this market is open.</small></article>
 </div></section>
 
@@ -123,8 +114,7 @@ const $ = id => document.getElementById(id);
 const sum = values => values.reduce((a,b) => a+b,0);
 const price = n => n.toLocaleString("en-US",{maximumSignificantDigits:9});
 const colors = {up:"#65d5a0",down:"#ff817a",gold:"#d4af37",dim:"#b8b3a4"};
-const FUT=["https://fapi.binance.com"];
-const intervals="1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M".split(" ");
+const intervals="1s 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M".split(" ");
 const results=new Map(), buttons=new Map();
 let snapshot=null, generation=0, busy=false;
 let replay=null;
@@ -181,8 +171,8 @@ function candle(row) {
 }
 
 async function load(symbol,interval) {
-  const path = "/fapi/v1/klines?"+new URLSearchParams({symbol,interval,limit:300});
-  for (const host of FUT) {
+  const path = "/api/v3/klines?"+new URLSearchParams({symbol,interval,limit:300});
+  for (const host of ["https://data-api.binance.vision","https://api.binance.com"]) {
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(),6500);
     try {
@@ -374,7 +364,8 @@ function draw() {
   label(time(visible.at(-1)),Math.max(56,plot-58),h-3,colors.dim);
 }
 
-
+const SPOT=["https://data-api.binance.vision","https://api.binance.com"];
+const FUT=["https://fapi.binance.com"];
 let feed=null;
 const fmt=n=>Number.isFinite(n)?n.toLocaleString("en-US",{maximumSignificantDigits:7}):"—";
 const clock=t=>new Date(t).toLocaleTimeString();
@@ -419,11 +410,9 @@ function connect(f,url,key,handle) {
   let ws;
   try {ws=new WebSocket(url);}catch {f[key]="Unavailable";return;}
   f.sockets.add(ws);
-  const timeout=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){f[key]="Connection timed out";ws.close();paintFlow();}},12000);
-  ws.onopen=()=>{clearTimeout(timeout);f[key]="Connected";};
-  ws.onerror=()=>{f[key]="Connection failed";paintFlow();};
+  ws.onopen=()=>{f[key]="Connected";};
   ws.onmessage=e=>{if(feed!==f)return;try{handle(JSON.parse(e.data));}catch{}};
-  ws.onclose=e=>{clearTimeout(timeout);f.sockets.delete(ws);if(feed===f){f[key]="Disconnected ("+e.code+") · retrying";schedule(f,()=>connect(f,url,key,handle),5000);}};
+  ws.onclose=()=>{f.sockets.delete(ws);if(feed===f){f[key]="Reconnecting";schedule(f,()=>connect(f,url,key,handle),5000);}};
 }
 function schedule(f,fn,delay){
   const timer=setTimeout(()=>{f.timers.delete(timer);if(feed===f)fn();},delay);f.timers.add(timer);
@@ -435,97 +424,22 @@ function repeat(f,job,delay) {
   }
   tick();
 }
-
-function chartVenue(f){return f?.exchange==="okx"?"OKX USDT perpetual":"Binance USDⓈ-M perpetual";}
-async function okxData(f,path){
-  const d=await jsonFrom(["https://www.okx.com"],"/api/v5/"+path,f);
-  if(d.code!=="0"||!Array.isArray(d.data))throw Error(d.msg||"OKX data unavailable");
-  return d.data;
-}
-function okxInterval(tf){
-  if(tf==="1M")return "1Mutc";
-  if(tf.endsWith("h"))return parseInt(tf)<6?tf.toUpperCase():tf.toUpperCase()+"utc";
-  if(/[dw]$/.test(tf))return tf.toUpperCase()+"utc";
-  return tf;
-}
-async function okxHistory(f){
-  const tf=$("period").value,id=++desk.serial;
-  const requestFrame=tf==="8h"?"4h":tf;
-  try{
-    const rows=await okxData(f,"market/candles?"+new URLSearchParams({instId:f.inst,bar:okxInterval(requestFrame),limit:300}));
-    if(feed!==f||id!==desk.serial)return;
-    f.ohlc=rows.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],
-      volume:+k[6],delta:NaN,end:endOf(+k[0],tf)-1})).sort((a,b)=>a.time-b.time);
-    if(tf==="8h"){
-      const grouped=new Map();
-      for(const bar of f.ohlc){
-        const time=bucket(bar.time,"8h"),old=grouped.get(time);
-        if(old){old.high=Math.max(old.high,bar.high);old.low=Math.min(old.low,bar.low);old.close=bar.close;old.volume+=bar.volume;}
-        else grouped.set(time,{...bar,time,end:endOf(time,"8h")-1});
-      }
-      f.ohlc=[...grouped.values()];
-    }
-    f.historyError="";updateSeries(f);
-  }catch(e){if(feed===f){f.historyError=e.message;paintDesk();}}
-}
-async function startOKX(){
-  stopFlow();
-  const s=$("pair").value,f=feed={s,symbol:s,exchange:"okx",inst:s.replace("USDT","-USDT-SWAP"),
-    trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
-    wire:"Loading OKX trades",force:"Unavailable on fallback",bookTime:0,quotes:{},ohlc:[],started:Date.now()};
-  desk.series=[];desk.profileTrades=[];desk.marks=[];resetViewport();
-  desk.foot=false;desk.count=80;$("ct").setAttribute("aria-pressed","true");$("ft").setAttribute("aria-pressed","false");
-  $("venue").innerHTML='<option>OKX · USDT perpetual fallback</option>';
-  $("barPick").replaceChildren();
-  $("connectionDetails").hidden=false;
-  $("connectionDetails").textContent="Binance connection unavailable. Chart uses OKX USDT perpetual data. Scanner and paper bot require Binance history. Historical OKX candles have no taker delta; footprint and CVD use captured OKX trades.";
-  // Start history independently so contract metadata cannot delay the chart.
-  repeat(f,()=>okxHistory(f),15000);
-  repeat(f,async()=>{
-    if(!f.ctVal){
-      const instruments=await okxData(f,"public/instruments?instType=SWAP&instId="+f.inst);
-      const spec=instruments[0];
-      if(!spec||spec.ctValCcy!==s.replace("USDT","")||!(+spec.ctVal>0))throw Error("Unsupported contract units");
-      f.ctVal=+spec.ctVal;
-    }
-    try{
-      const rows=await okxData(f,"market/trades?instId="+f.inst+"&limit=500");
-      mergeTrades(f,rows.map(t=>({a:+t.tradeId,T:+t.ts,p:t.px,q:+t.sz*f.ctVal,m:t.side==="sell"})));
-      f.wire="OKX HTTP polling · "+clock(Date.now());f.tradeError=false;
-    }catch(e){f.tradeError=true;f.wire=e.message;}
-  },3000);
-  repeat(f,async()=>{
-    if(!f.ctVal)return;
-    try{
-      const rows=await okxData(f,"market/books?instId="+f.inst+"&sz=20"),b=rows[0];
-      if(!b)return;
-      const convert=rows=>rows.map(r=>[+r[0],+r[1]*f.ctVal]);
-      f.books.push({t:+b.ts,b:convert(b.bids),a:convert(b.asks)});
-      if(f.books.length>120)f.books.shift();f.bookError=false;
-    }catch{f.bookError=true;}
-  },5000);
-  f.paint=setInterval(()=>{paintFlow();},2000);paintFlow();
-}
-
 function stopFlow(){
   const f=feed;feed=null;
   if(!f)return;
   f.stop.abort();f.sockets.forEach(ws=>ws.close());f.timers.forEach(clearTimeout);clearInterval(f.paint);
 }
 function startFlow(){
-  $("venue").innerHTML='<option>Binance · USDT perpetual</option>';
   stopFlow();
-  const s=$("pair").value;
-  const f=feed={s,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
+  const s=$("pair").value,perp=$("venue").value==="perp",prefix=perp?"/fapi/v1/":"/api/v3/";
+  const f=feed={s,perp,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
     wire:"Connecting",force:"Connecting",bookTime:0,quotes:{},symbol:s};
-  f.started=Date.now();f.ohlc=[];desk.series=[];desk.profileTrades=[];desk.marks=[];tool("");resetViewport();repeat(f,()=>fetchHistory(f),30000);
-  const api=(name,extra="")=>jsonFrom(FUT,"/fapi/v1/"+name+"?symbol="+s+extra,f);
+  f.ohlc=[];desk.series=[];desk.profileTrades=[];desk.marks=[];tool("");resetViewport();repeat(f,()=>fetchHistory(f),30000);
+  const api=(name,extra="")=>jsonFrom(perp?FUT:SPOT,prefix+name+"?symbol="+s+extra,f);
   const futures=(path,extra="")=>jsonFrom(FUT,path+"?symbol="+s+extra,f);
   $("barPick").replaceChildren();$("alertMsg").textContent="";$("anchor").value="";
   const stream=s.toLowerCase(),route="wss://fstream.binance.com/market/ws/";
-  schedule(f,()=>{if(!f.ohlc.length||f.historyError)startOKX();},14000);
-  connectCandles(f);
-  connect(f,route+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
+  connect(f,(perp?route:"wss://data-stream.binance.vision/ws/")+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
   connect(f,route+stream+"@markPrice@1s","markWire",d=>{
     if(+d.p>0 && Number.isFinite(+d.r)){
       f.markTick={markPrice:d.p,lastFundingRate:d.r,time:+d.E};f.rateSamples??=[];
@@ -533,7 +447,7 @@ function startFlow(){
       checkAlert(f,"funding",100*Number(d.r),+d.E);
     }
   });
-  connect(f,"wss://fstream.binance.com/public/ws/"+stream+"@bookTicker","bboWire",d=>{
+  if(perp)connect(f,"wss://fstream.binance.com/public/ws/"+stream+"@bookTicker","bboWire",d=>{
     if(+d.b>0 && +d.a>0)f.bbo={t:+d.E,b:[[+d.b,+d.B]],a:[[+d.a,+d.A]],best:true};
   });
   connect(f,route+stream+"@forceOrder","force",d=>{
@@ -584,9 +498,9 @@ function startFlow(){
   repeat(f,async()=>{try{f.day=await api("ticker/24hr");}catch{f.day=null;}},30000);
   repeat(f,async()=>{
     const quotes=[
-      ["Binance",FUT,"/fapi/v2/ticker/price?symbol="+s,d=>+d.price],
-      ["Bybit",["https://api.bybit.com"],"/v5/market/tickers?category=linear&symbol="+s,d=>+d.result.list[0].lastPrice],
-      ["OKX",["https://www.okx.com"],"/api/v5/market/ticker?instId="+s.replace("USDT","-USDT-SWAP"),d=>+d.data[0].last]
+      ["Binance",SPOT,"/api/v3/ticker/price?symbol="+s,d=>+d.price],
+      ["Bybit",["https://api.bybit.com"],"/v5/market/tickers?category=spot&symbol="+s,d=>+d.result.list[0].lastPrice],
+      ["Coinbase",["https://api.exchange.coinbase.com"],"/products/"+s.replace("USDT","-USD")+"/ticker",d=>+d.price]
     ];
     await Promise.all(quotes.map(async([key,hosts,path,val])=>{
       try{const p=val(await jsonFrom(hosts,path,f));f.quotes[key]=p>0?p:null;}catch{f.quotes[key]=null;}
@@ -728,7 +642,7 @@ function paintFlow(){
   const trades=[...f.trades.values()].sort((a,b)=>a.id-b.id);
   if(trades.length){
     const gaps=trades.reduce((n,t,i)=>n+(i&&t.id>trades[i-1].id+1?1:0),0);
-    $("coverage").textContent=chartVenue(f)+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · "+(f.exchange==="okx"?"sampled trades · ":"stream ")+f.wire+(f.tradeError?" · REST unavailable":"")+(f.historyError?" · Historical candles unavailable; live candles build from connection.":"")+". First and current bars may be partial.";
+    $("coverage").textContent=(f.perp?"USDⓈ-M perpetual":"Binance Spot")+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · stream "+f.wire+(f.tradeError?" · REST unavailable":"")+". First and current bars may be partial.";
     paintTrades(f,trades);
   }else{
     $("coverage").textContent=f.s+" · "+(f.tradeError?"Trade feed unavailable":"Waiting for aggregate trades")+" · stream "+f.wire;
@@ -741,7 +655,7 @@ function paintFlow(){
   heat("depthMap",f.books.map(b=>[...b.b.map(([p,q])=>({p,q,buy:true})),...b.a.map(([p,q])=>({p,q,buy:false}))]),"oldest → newest");
   const leverage=+$("leverage").value;
   let model=Array.isArray(f.model)?f.model:[];
-  const modeledFromPrints=!model.length;
+  const modeledFromPrints=!model.length && f.perp;
   if(modeledFromPrints){
     const observed=new Map();
     for(const t of trades){const k=bucket(t.t,"5m"),r=observed.get(k)||[k,0,0,0,t.p,0];r[4]=t.p;r[5]+=t.q;observed.set(k,r);}
@@ -760,11 +674,11 @@ function paintFlow(){
   heat("liqMap",slots,"reported liquidations · last 30 minutes");
   put("liqTape",["Time","Closed side","Fill price","Filled qty"],f.liqs.slice(-6).reverse().map(t=>[clock(t.t),t.buy?"Short":"Long",fmt(t.p),fmt(t.q)]),"No reported fills observed.");
   $("daily").textContent="Selected Binance market · 24h high "+fmt(+f.day?.highPrice)+" · low "+fmt(+f.day?.lowPrice)+" · volume "+fmt(+f.day?.volume)+" coins · change "+fmt(+f.day?.priceChangePercent)+"%";
-  put("quotes",["Perpetual venue","Last price"],["Binance","Bybit","OKX"].map(k=>[k,fmt(f.quotes[k])+" USDT"]));
+  put("quotes",["Spot venue","Last price"],["Binance","Bybit","Coinbase"].map(k=>[k,fmt(f.quotes[k])+" "+(k==="Coinbase"?"USD":"USDT")]));
 }
-$("pair").innerHTML=$("symbol").innerHTML;$("period").innerHTML='<option value="1s">1s · observed trades</option>'+$("interval").innerHTML;
+$("pair").innerHTML=$("symbol").innerHTML;$("period").innerHTML=$("interval").innerHTML;
 $("period").value="5m";
-$("pair").onchange=startFlow;
+$("venue").onchange=$("pair").onchange=startFlow;
 for(const id of ["period","rowSize","barPick","range","anchor","minPrint","leverage","minutes"])$(id).onchange=paintFlow;
 $("arm").onclick=()=>{
   const p=$("alertPrice").valueAsNumber;const metric=$("metric").value;if(!feed||!Number.isFinite(p)||(metric!=="funding"&&p<=0)){$("alertMsg").textContent="Enter a valid threshold.";return;}
@@ -787,44 +701,17 @@ function endOf(t,tf){
   return t+parseInt(tf)*({s:1000,m:60000,h:3600000,d:86400000,w:604800000})[tf.slice(-1)];
 }
 async function fetchHistory(f){
-  if(f.exchange==="okx")return okxHistory(f);
   const tf=$("period").value,id=++desk.serial;
-  if(tf==="1s")return;
+  if(f.perp&&tf==="1s")return;
   try{
-    const rows=await jsonFrom(FUT,"/fapi/v1/klines?"+new URLSearchParams({symbol:f.s,interval:tf,limit:300}),f);
+    const rows=await jsonFrom(f.perp?FUT:SPOT,(f.perp?"/fapi/v1":"/api/v3")+"/klines?"+new URLSearchParams({symbol:f.s,interval:tf,limit:300}),f);
     if(feed!==f||id!==desk.serial)return;
-    const merged=new Map(rows.map(candle).map(b=>[b.time,b]));
-    for(const b of f.ohlc)if(b.time>=rows.at(-1)[0])merged.set(b.time,b);
-    f.ohlc=[...merged.values()].sort((a,b)=>a.time-b.time).slice(-300);f.historyError="";updateSeries(f);
-  }catch{if(feed===f){f.historyError="Historical candles unavailable";paintDesk();}}
+    f.ohlc=rows.map(candle);updateSeries(f);
+  }catch{/* On a restricted endpoint the observed trades supply the price series. */}
 }
 function resetViewport(){
   desk.end=null;desk.hover=null;desk.sy=1;desk.count=desk.foot?(surface.clientWidth<560?4:8):60;
 }
-
-function connectCandles(f){
-  if(f.exchange==="okx")return;
-  if(f.klineSocket){f.sockets.delete(f.klineSocket);f.klineSocket.onclose=null;f.klineSocket.close();}
-  const tf=$("period").value;
-  if(tf==="1s")return;
-  const socket=new WebSocket("wss://fstream.binance.com/market/ws/"+f.s.toLowerCase()+"@kline_"+tf);
-  f.klineSocket=socket;f.sockets.add(socket);f.candleStatus="Connecting";
-  const timeout=setTimeout(()=>{if(socket.readyState===WebSocket.CONNECTING){f.candleStatus="Connection timed out";socket.close();}},12000);
-  socket.onopen=()=>{clearTimeout(timeout);f.candleStatus="Connected";};
-  socket.onmessage=e=>{
-    if(feed!==f||$("period").value!==tf)return;
-    try{
-      const k=JSON.parse(e.data).k;if(!k)return;
-      const bar=candle([k.t,k.o,k.h,k.l,k.c,k.v,k.T,0,0,k.V]);
-      const rows=new Map(f.ohlc.map(b=>[b.time,b]));rows.set(bar.time,bar);
-      f.ohlc=[...rows.values()].sort((a,b)=>a.time-b.time).slice(-300);
-      f.candleLive=Date.now();updateSeries(f);
-    }catch(e){console.warn("Candle stream",e.message);}
-  };
-  socket.onerror=()=>{f.candleStatus="Connection failed";};
-  socket.onclose=e=>{clearTimeout(timeout);f.candleStatus="Disconnected ("+e.code+") · retrying";f.sockets.delete(socket);if(feed===f&&$("period").value===tf)schedule(f,()=>connectCandles(f),5000);};
-}
-
 function updateSeries(f){
   const tf=$("period").value,all=[...f.trades.values()].sort((a,b)=>a.t-b.t||a.id-b.id);
   const m=new Map((f.ohlc||[]).map(b=>[b.time,{...b,prints:[],history:true}]));
@@ -841,8 +728,7 @@ function updateSeries(f){
   const since=range==="session"?Math.floor(now/86400000)*86400000:range==="anchor"?Date.parse($("anchor").value):range==="fixed"?now-60000*Math.max(1,$("minutes").valueAsNumber):0;
   desk.profileTrades=all.filter(t=>t.t>=since);
   for(const b of desk.series){
-    if(f.exchange==="okx"){b.delta=b.prints.length?sum(b.prints.map(t=>t.buy?t.q:-t.q)):NaN;}
-    if(Number.isFinite(b.delta))cvd+=b.delta;b.cvd=Number.isFinite(b.delta)?cvd:NaN;
+    cvd+=b.delta;b.cvd=cvd;
     for(const t of b.prints){if(!(t.t>=since))continue;
       v+=t.q;pv+=t.p*t.q;p2+=t.p*t.p*t.q;
       if(t.buy){bq+=t.q;bpv+=t.q*t.p;}else{sq+=t.q;spv+=t.q*t.p;}
@@ -881,8 +767,8 @@ function paintDesk(){
   function rect(x,y,w,h,col){c.fillStyle=col;c.fillRect(x,y,w,h);}
   function text(s,x,y,col="#c8c5b7"){c.fillStyle=col;c.fillText(s,x,y);}
   const f=feed,bs=desk.series,tf=$("period").value,on=k=>layers.has(k);
-  $("marketTitle").textContent=chartVenue(f)+" · "+$("pair").value+" · "+tf;
-  if(!f||!bs.length){desk.g=null;const msg=f?.historyError||Date.now()-f?.started>12000?"Futures data unavailable. Check internet or network restrictions, then Reconnect data.":"Connecting to Binance futures…";$("ohlc").textContent=msg;$("chartNote").textContent=Date.now()-f?.started>12000?"Connection pending. Use Connection report to inspect the failed feeds.":"Live candles and trade data are loading.";text(msg,12,45);return;}
+  $("marketTitle").textContent=$("pair").value+" · "+($("venue").value==="spot"?"Spot":"Perpetual")+" · "+tf;
+  if(!f||!bs.length){desk.g=null;$("ohlc").textContent="Waiting for exchange data…";$("chartNote").textContent="";return;}
   let end=desk.end===null?bs.length-1:bs.findIndex(b=>b.time>=desk.end);if(end<0)end=bs.length-1;
   const count=desk.count,start=end-count+1,from=Math.max(0,start),visible=bs.slice(from,end+1);
   const l=6,R=W-(W<500?67:82),top=20,axis=H-22,dx=(R-l)/count;
@@ -948,11 +834,11 @@ function paintDesk(){
   });
   if(on("vwap"))curve(b=>b.avg,colors.gold);if(on("bands"))for(const n of [-1,1])curve(b=>b.avg+n*b.sd,"#c8aa68",[3,3]);
   if(on("side")){curve(b=>b.bv,colors.up);curve(b=>b.sv,colors.down);}
-  if(on("liq")&&f.exchange!=="okx")for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
-  if(on("model"))for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
+  if(on("liq")&&f.perp)for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
+  if(on("model")&&f.perp)for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
   const last=bs[end];
   line(l,y(last.close),R,y(last.close),"#aaa691",[2,4]);
-  if(on("setup")&&f.exchange!=="okx"){
+  if(on("setup")){
     const closed=bs.slice(0,end+1).filter(b=>b.history && b.end<Date.now());
     const signal=analyse(closed,profile(closed));
     if(signal?.checks && (signal.label==="BUY"||signal.label==="SELL")){
@@ -983,7 +869,7 @@ function paintDesk(){
   if(finger&&finger.x<R&&finger.y>=top&&finger.y<=axis){line(finger.x,top,finger.x,axis,"#ada48f",[2,3]);line(l,finger.y,R,finger.y,"#ada48f",[2,3]);}
   const b=bs[hoverIndex];$("ohlc").textContent=when(b.time)+" · O "+fmt(b.open)+" H "+fmt(b.high)+" L "+fmt(b.low)+" C "+fmt(b.close)+rowText;
   $("scale").textContent=count+" bars · "+(desk.end===null?"Live edge":"Panned");
-  $("chartNote").textContent=(desk.foot?"Sell × buy rows · "+fmt(step)+" USDT per row. Blank candles have no captured trades. ":"")+(on("heat")?"Heatmap: green bids / orange asks, sampled since opening. ":"")+(on("model")?"Violet dashed = assumed leverage levels. ":"")+(f.exchange==="okx"?"OKX fallback · historical delta unavailable · footprint and CVD cover captured trades only.":"");
+  $("chartNote").textContent=(desk.foot?"Sell × buy rows · "+fmt(step)+" USDT per row. Blank candles have no captured trades. ":"")+(on("heat")?"Heatmap: green bids / orange asks, sampled since opening. ":"")+(on("model")?"Violet dashed = assumed leverage levels. ":"");
 }
 
 function queuePlot(){if(!desk.raf)desk.raf=requestAnimationFrame(()=>{desk.raf=0;paintDesk();});}
@@ -1038,24 +924,7 @@ $("flowTab").onclick=()=>{
   if(desk.fromScanner){$("pair").value=$("symbol").value;$("period").value=$("interval").value;desk.fromScanner=false;}startFlow();
 };
 $("interactive").onclick=()=>$("flowTab").click();
-$("period").onchange=()=>{if(feed){feed.ohlc=[];feed.historyError="";resetViewport();connectCandles(feed);updateSeries(feed);fetchHistory(feed);}};
-$("retryFeed").onclick=startFlow;
-$("connectionReport").onclick=()=>{
-  const f=feed, report=$("connectionDetails");
-  report.hidden=false;
-  report.textContent=[
-    "FlowSignal connection report · "+new Date().toISOString(),
-    "Browser online indicator · "+navigator.onLine,
-    "Market · Binance USDT perpetual "+$("pair").value+" / "+$("period").value,
-    "Trade stream · "+(f?.wire||"Not started"),
-    "Candle stream · "+(f?.candleStatus||"Not started"),
-    "Historical candles · "+(f?.historyError||((f?.ohlc?.length||0)>1?"Received":"Pending")),
-    "Captured trades · "+(f?.trades.size||0),
-    "REST · https://fapi.binance.com",
-    "Streams · wss://fstream.binance.com",
-    "Browser fetch/WebSocket errors may hide the cause. Failed connection alone cannot identify ISP, browser, exchange or regional restrictions."
-  ].join("\n");
-};
+$("period").onchange=()=>{if(feed){feed.ohlc=[];resetViewport();updateSeries(feed);fetchHistory(feed);}};
 $("scanTab").onclick=()=>view(false); $("learnTab").onclick=()=>view(true);
 $("symbol").onchange=()=>run(true);
 $("interval").onchange=selectFrame;
@@ -1063,116 +932,6 @@ $("refresh").onclick=()=>run();
 $("capital").oninput=$("risk").oninput=calculate;
 new ResizeObserver(draw).observe($("chart"));
 window.addEventListener("resize",draw);
-
-// Simulated USDT-linear positions. A cross-tab lock serializes ledger writes.
-const paperKey="flowsignal.paper.v1";
-const istDay=t=>new Date(t+19800000).toISOString().slice(0,10);
-const paperTime=t=>new Date(t).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"});
-function readPaper(){return JSON.parse(localStorage.getItem(paperKey)||"null");}
-function savePaper(b){localStorage.setItem(paperKey,JSON.stringify(b));}
-function paperOrder(a,entry,b){
-  if(!a||!["BUY","SELL"].includes(a.label)||!(entry>0))return null;
-  const sign=a.buy?1:-1, distance=sign*(entry-a.stop);
-  if(!(distance>0)||!(b.balance>0))return null;
-  const target=[a.tp1,a.tp2].find(t=>sign*(t-entry)/distance>=1.5);
-  if(!Number.isFinite(target))return null;
-  const qty=b.balance*(b.risk/100)/distance;
-  if(!Number.isFinite(qty)||qty<=0)return null;
-  return {entry,stop:a.stop,target,qty,rr:sign*(target-entry)/distance,sign};
-}
-function paperExit(p,c){
-  const long=p.sign===1;
-  if(long?c.open<=p.stop:c.open>=p.stop)return [c.open,"SL gap"];
-  if(long?c.open>=p.target:c.open<=p.target)return [p.target,"TP"];
-  if(long?c.low<=p.stop:c.high>=p.stop)return [p.stop,"SL"];
-  if(long?c.high>=p.target:c.low<=p.target)return [p.target,"TP"];
-  return null;
-}
-function settlePaper(b,bar){
-  const p=b.open, hit=paperExit(p,bar);
-  if(!hit)return false;
-  const [exit,reason]=hit, pnl=p.sign*(exit-p.entry)*p.qty;
-  // OHLC gives the bar, not the exact fill time. Use bar end (or observation time for a forming bar).
-  b.history.unshift({...p,exit,reason,pnl,lossDay:istDay(Math.min(bar.end,Date.now()))});
-  b.last=Math.max(b.last,p.time,bar.time);b.balance+=pnl;b.open=null;return true;
-}
-async function paperBars(b){
-  // Resume an older position from its last inspected candle before processing live signals.
-  if(b.open){
-    const q=new URLSearchParams({symbol:b.pair,interval:b.frame,startTime:b.open.cursor,limit:300});
-    const res=await fetch(FUT[0]+"/fapi/v1/klines?"+q,{cache:"no-store",signal:AbortSignal.timeout(8000)});
-    if(!res.ok)throw Error("Futures history unavailable");
-    const rows=(await res.json()).map(candle);
-    if(!rows.length||rows[0].time!==b.open.cursor)throw Error("Missing candle history; position reconciliation pending");
-    let expected=b.open.cursor;
-    for(const c of rows){
-      if(c.time!==expected)throw Error("Gap in futures history");
-      if(settlePaper(b,c))break;
-      b.open.cursor=c.time;expected=c.end+1;
-    }
-    if(b.open&&rows.length===300&&rows.at(-1).end<Date.now())b.open.cursor=expected;
-    b.note=b.open?"Monitoring SL and target.":"Paper position closed.";
-    return;
-  }
-  if(!b.active)return;
-  const rows=await load(b.pair,b.frame), live=rows.at(-1),closed=rows.slice(0,-1),last=closed.at(-1);
-  const now=Date.now();
-  if(live.time!==last.end+1||now<live.time||now>live.end||live.time<=b.since||live.time<=b.last)return;
-  b.last=live.time;
-  if(now-live.time>45000){b.note="Skipped late signal. Waiting for next close.";return;}
-  const day=istDay(live.time);
-  if(b.history.filter(t=>istDay(t.time)===day).length>=3||b.history.filter(t=>t.lossDay===day&&t.pnl<0).length>=3){
-    b.note="Daily cap reached (IST).";return;
-  }
-  const a=analyse(closed,profile(closed)),order=paperOrder(a,live.open,b);
-  if(!order){b.note="Last close: "+(a?.label||"WAIT")+" · no qualifying entry.";return;}
-  b.open={...order,pair:b.pair,frame:b.frame,time:live.time,cursor:live.time};
-  b.note="Paper position opened.";
-  if(settlePaper(b,live))b.note="Paper position opened and closed within entry candle.";
-}
-function showPaper(b){
-  const frozen=!!(b?.active||b?.open);
-  $("botStart").disabled=frozen;$("botPause").disabled=!b?.active;
-  const ids=["botPair","botFrame","botRisk","botCapital"];
-  ids.forEach((id,i)=>$(id).disabled=frozen||(i===3&&!!b));
-  if(b){
-    $("botCapital").value=b.seed;
-    if(frozen){$("botPair").value=b.pair;$("botFrame").value=b.frame;$("botRisk").value=b.risk;}
-  }
-  $("botState").textContent=(b?.active?"Running":b?.open?"Entries paused · managing position":"Stopped")+" · "+(b?.note||"Choose a contract and start.");
-  $("botEquity").textContent=b?"Realized balance "+price(b.balance)+" USDT · closed P&L "+price(b.balance-b.seed)+" USDT":"";
-  const p=b?.open;
-  $("botOpen").textContent=p?[p.pair,p.frame,p.sign===1?"LONG":"SHORT","Entry "+price(p.entry),"SL "+price(p.stop),"TP "+price(p.target),price(p.qty)+" coins","1:"+p.rr.toFixed(2)].join(" · "):"No open paper position.";
-  const body=$("botHistory");body.replaceChildren();
-  for(const t of (b?.history||[]).slice(0,100)){
-    const tr=body.insertRow();
-    for(const v of [paperTime(t.time),t.pair+" / "+t.frame,t.sign===1?"LONG":"SHORT",price(t.entry),price(t.stop),price(t.target),price(t.qty),"1:"+t.rr.toFixed(2),t.reason+" "+price(t.exit),price(t.pnl)])tr.insertCell().textContent=v;
-  }
-}
-async function paperAction(mode){
-  try{
-    if(!navigator.locks)throw Error("Open via HTTPS to use the paper ledger");
-    await navigator.locks.request(paperKey,{ifAvailable:mode==="tick"},async lock=>{
-      if(!lock)return;
-      let b=readPaper();
-      if(mode==="start"&&!b?.active&&!b?.open){
-        const seed=b?.seed??$("botCapital").valueAsNumber,risk=$("botRisk").valueAsNumber;
-        if(!(Number.isFinite(seed)&&seed>0&&risk>0&&risk<=1))throw Error("Enter positive capital and risk up to 1%");
-        b??={seed,balance:seed,history:[],open:null};
-        Object.assign(b,{active:true,pair:$("botPair").value,frame:$("botFrame").value,risk,since:Date.now(),last:0,note:"Waiting for next closed candle."});
-      }else if(mode==="pause"&&b){b.active=false;b.note=b.open?"Open trade still managed.":"Entries paused.";}
-      else if(mode==="tick"&&(b?.active||b?.open)){await paperBars(b);}
-      else {showPaper(b);return;}
-      savePaper(b);showPaper(b);
-    });
-  }catch(e){$("botState").textContent="Paper bot · "+e.message+". Check data or browser storage.";}
-}
-$("botPair").innerHTML=$("symbol").innerHTML;$("botFrame").innerHTML=$("interval").innerHTML;$("botFrame").value="5m";
-$("botStart").onclick=()=>paperAction("start");$("botPause").onclick=()=>paperAction("pause");
-function refreshPaper(){try{showPaper(readPaper());}catch(e){$("botState").textContent=e.message;}}
-window.addEventListener("storage",e=>{if(e.key===paperKey)refreshPaper();});
-refreshPaper();paperAction("tick");setInterval(()=>paperAction("tick"),10000);
-
 render(); run();$("period").value="1m";$("flowTab").click(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
 </script></body></html>
 
