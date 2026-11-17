@@ -53,7 +53,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
-<label>Market<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
+<label>USDⓈ-M perpetual contract<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
 <label>Timeframe<select id="interval"></select></label>
 <button id="refresh">↻ Refresh</button><span class="status" id="status" role="status">Loading…</span></div>
 <article class="overview"><div class="heading"><h2>All timeframes</h2><small>Select a timeframe to open its chart</small></div><div id="frames"></div></article>
@@ -69,7 +69,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <output id="size"></output><p><small>Uses stop distance and assumes 1 USDT ≈ $1. Excludes fees and slippage.</small></p></article>
 </section>
 <section id="flow" hidden aria-label="Order flow">
-<div class="controls"><label>Binance market<select id="venue"><option value="spot">Spot</option><option value="perp">USDⓈ-M perpetual</option></select></label>
+<div class="controls"><label>Binance market<select id="venue" disabled><option value="perp">USDⓈ-M perpetual</option></select></label>
 <label>Symbol<select id="pair"></select></label><label>Interval<select id="period"></select></label>
 <label>Price row<select id="rowSize"><option value="0">Auto</option><option>0.0001</option><option>0.001</option><option>0.01</option><option>0.1</option><option>1</option><option>10</option><option>100</option></select></label></div>
 <figure id="terminal">
@@ -89,7 +89,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <article><h2>Perpetual funding &amp; open interest</h2><p id="fstats"></p><div id="oiMap"></div><div id="fundHistory" class="scroll"></div><small>Binance USDⓈ-M mark and funding. History panels identify the exchange; Bybit linear history or observed OKX swap OI can appear as labeled. OI heatmap shows open contracts over time. Funding history shows settled rates.</small></article>
 <article><h2>Reported liquidations</h2><p id="liqStatus"></p><div id="liqMap"></div><div id="liqTape"></div><small>Binance USDⓈ-M publishes sampled forced-order snapshots. Heatmap shows reported fills by time and price. Future liquidation levels are unknown.</small></article>
 <article><h2>Hypothetical leverage levels</h2><label>Assumed leverage<select id="leverage"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label><div id="scenario"></div><small>Illustration using each 5m perpetual close as an assumed entry. Green = assumed long, red = assumed short. Distance = entry / leverage. Brightness uses candle volume as a proxy. Actual positions, margin mode, fees and maintenance margin are unknown. These are simplified bankruptcy levels.</small></article>
-<article><h2>Exchange comparison</h2><div id="quotes"></div><p id="daily"></p><small>Spot last prices. Coinbase uses USD, Binance and Bybit use USDT. Quotes are sampled independently.</small></article>
+<article><h2>Exchange comparison</h2><div id="quotes"></div><p id="daily"></p><small>Last traded prices for USDT perpetual contracts. Quotes are sampled independently.</small></article>
 <article><h2>Market alert</h2><div class="controls"><label>Metric<select id="metric"><option value="price">Trade price</option><option value="volume">Print volume (coins)</option><option value="funding">Perpetual funding (%)</option></select></label><label>Direction<select id="alertSide"><option>Above</option><option>Below</option></select></label><label>Threshold<input type="number" step="any" id="alertPrice"></label><button id="arm">Set alert</button></div><output id="alertMsg" role="status"></output><small>One-shot alert while this market is open.</small></article>
 </div></section>
 
@@ -114,7 +114,8 @@ const $ = id => document.getElementById(id);
 const sum = values => values.reduce((a,b) => a+b,0);
 const price = n => n.toLocaleString("en-US",{maximumSignificantDigits:9});
 const colors = {up:"#65d5a0",down:"#ff817a",gold:"#d4af37",dim:"#b8b3a4"};
-const intervals="1s 1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M".split(" ");
+const FUT=["https://fapi.binance.com"];
+const intervals="1m 3m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M".split(" ");
 const results=new Map(), buttons=new Map();
 let snapshot=null, generation=0, busy=false;
 let replay=null;
@@ -171,8 +172,8 @@ function candle(row) {
 }
 
 async function load(symbol,interval) {
-  const path = "/api/v3/klines?"+new URLSearchParams({symbol,interval,limit:300});
-  for (const host of ["https://data-api.binance.vision","https://api.binance.com"]) {
+  const path = "/fapi/v1/klines?"+new URLSearchParams({symbol,interval,limit:300});
+  for (const host of FUT) {
     const controller = new AbortController();
     const timer = setTimeout(()=>controller.abort(),6500);
     try {
@@ -364,8 +365,7 @@ function draw() {
   label(time(visible.at(-1)),Math.max(56,plot-58),h-3,colors.dim);
 }
 
-const SPOT=["https://data-api.binance.vision","https://api.binance.com"];
-const FUT=["https://fapi.binance.com"];
+
 let feed=null;
 const fmt=n=>Number.isFinite(n)?n.toLocaleString("en-US",{maximumSignificantDigits:7}):"—";
 const clock=t=>new Date(t).toLocaleTimeString();
@@ -431,15 +431,15 @@ function stopFlow(){
 }
 function startFlow(){
   stopFlow();
-  const s=$("pair").value,perp=$("venue").value==="perp",prefix=perp?"/fapi/v1/":"/api/v3/";
-  const f=feed={s,perp,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
+  const s=$("pair").value;
+  const f=feed={s,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
     wire:"Connecting",force:"Connecting",bookTime:0,quotes:{},symbol:s};
   f.ohlc=[];desk.series=[];desk.profileTrades=[];desk.marks=[];tool("");resetViewport();repeat(f,()=>fetchHistory(f),30000);
-  const api=(name,extra="")=>jsonFrom(perp?FUT:SPOT,prefix+name+"?symbol="+s+extra,f);
+  const api=(name,extra="")=>jsonFrom(FUT,"/fapi/v1/"+name+"?symbol="+s+extra,f);
   const futures=(path,extra="")=>jsonFrom(FUT,path+"?symbol="+s+extra,f);
   $("barPick").replaceChildren();$("alertMsg").textContent="";$("anchor").value="";
   const stream=s.toLowerCase(),route="wss://fstream.binance.com/market/ws/";
-  connect(f,(perp?route:"wss://data-stream.binance.vision/ws/")+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
+  connect(f,route+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
   connect(f,route+stream+"@markPrice@1s","markWire",d=>{
     if(+d.p>0 && Number.isFinite(+d.r)){
       f.markTick={markPrice:d.p,lastFundingRate:d.r,time:+d.E};f.rateSamples??=[];
@@ -447,7 +447,7 @@ function startFlow(){
       checkAlert(f,"funding",100*Number(d.r),+d.E);
     }
   });
-  if(perp)connect(f,"wss://fstream.binance.com/public/ws/"+stream+"@bookTicker","bboWire",d=>{
+  connect(f,"wss://fstream.binance.com/public/ws/"+stream+"@bookTicker","bboWire",d=>{
     if(+d.b>0 && +d.a>0)f.bbo={t:+d.E,b:[[+d.b,+d.B]],a:[[+d.a,+d.A]],best:true};
   });
   connect(f,route+stream+"@forceOrder","force",d=>{
@@ -498,9 +498,9 @@ function startFlow(){
   repeat(f,async()=>{try{f.day=await api("ticker/24hr");}catch{f.day=null;}},30000);
   repeat(f,async()=>{
     const quotes=[
-      ["Binance",SPOT,"/api/v3/ticker/price?symbol="+s,d=>+d.price],
-      ["Bybit",["https://api.bybit.com"],"/v5/market/tickers?category=spot&symbol="+s,d=>+d.result.list[0].lastPrice],
-      ["Coinbase",["https://api.exchange.coinbase.com"],"/products/"+s.replace("USDT","-USD")+"/ticker",d=>+d.price]
+      ["Binance",FUT,"/fapi/v2/ticker/price?symbol="+s,d=>+d.price],
+      ["Bybit",["https://api.bybit.com"],"/v5/market/tickers?category=linear&symbol="+s,d=>+d.result.list[0].lastPrice],
+      ["OKX",["https://www.okx.com"],"/api/v5/market/ticker?instId="+s.replace("USDT","-USDT-SWAP"),d=>+d.data[0].last]
     ];
     await Promise.all(quotes.map(async([key,hosts,path,val])=>{
       try{const p=val(await jsonFrom(hosts,path,f));f.quotes[key]=p>0?p:null;}catch{f.quotes[key]=null;}
@@ -642,7 +642,7 @@ function paintFlow(){
   const trades=[...f.trades.values()].sort((a,b)=>a.id-b.id);
   if(trades.length){
     const gaps=trades.reduce((n,t,i)=>n+(i&&t.id>trades[i-1].id+1?1:0),0);
-    $("coverage").textContent=(f.perp?"USDⓈ-M perpetual":"Binance Spot")+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · stream "+f.wire+(f.tradeError?" · REST unavailable":"")+". First and current bars may be partial.";
+    $("coverage").textContent="Binance USDⓈ-M perpetual"+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · stream "+f.wire+(f.tradeError?" · REST unavailable":"")+". First and current bars may be partial.";
     paintTrades(f,trades);
   }else{
     $("coverage").textContent=f.s+" · "+(f.tradeError?"Trade feed unavailable":"Waiting for aggregate trades")+" · stream "+f.wire;
@@ -655,7 +655,7 @@ function paintFlow(){
   heat("depthMap",f.books.map(b=>[...b.b.map(([p,q])=>({p,q,buy:true})),...b.a.map(([p,q])=>({p,q,buy:false}))]),"oldest → newest");
   const leverage=+$("leverage").value;
   let model=Array.isArray(f.model)?f.model:[];
-  const modeledFromPrints=!model.length && f.perp;
+  const modeledFromPrints=!model.length;
   if(modeledFromPrints){
     const observed=new Map();
     for(const t of trades){const k=bucket(t.t,"5m"),r=observed.get(k)||[k,0,0,0,t.p,0];r[4]=t.p;r[5]+=t.q;observed.set(k,r);}
@@ -674,11 +674,11 @@ function paintFlow(){
   heat("liqMap",slots,"reported liquidations · last 30 minutes");
   put("liqTape",["Time","Closed side","Fill price","Filled qty"],f.liqs.slice(-6).reverse().map(t=>[clock(t.t),t.buy?"Short":"Long",fmt(t.p),fmt(t.q)]),"No reported fills observed.");
   $("daily").textContent="Selected Binance market · 24h high "+fmt(+f.day?.highPrice)+" · low "+fmt(+f.day?.lowPrice)+" · volume "+fmt(+f.day?.volume)+" coins · change "+fmt(+f.day?.priceChangePercent)+"%";
-  put("quotes",["Spot venue","Last price"],["Binance","Bybit","Coinbase"].map(k=>[k,fmt(f.quotes[k])+" "+(k==="Coinbase"?"USD":"USDT")]));
+  put("quotes",["Perpetual venue","Last price"],["Binance","Bybit","OKX"].map(k=>[k,fmt(f.quotes[k])+" USDT"]));
 }
-$("pair").innerHTML=$("symbol").innerHTML;$("period").innerHTML=$("interval").innerHTML;
+$("pair").innerHTML=$("symbol").innerHTML;$("period").innerHTML='<option value="1s">1s · observed trades</option>'+$("interval").innerHTML;
 $("period").value="5m";
-$("venue").onchange=$("pair").onchange=startFlow;
+$("pair").onchange=startFlow;
 for(const id of ["period","rowSize","barPick","range","anchor","minPrint","leverage","minutes"])$(id).onchange=paintFlow;
 $("arm").onclick=()=>{
   const p=$("alertPrice").valueAsNumber;const metric=$("metric").value;if(!feed||!Number.isFinite(p)||(metric!=="funding"&&p<=0)){$("alertMsg").textContent="Enter a valid threshold.";return;}
@@ -702,9 +702,9 @@ function endOf(t,tf){
 }
 async function fetchHistory(f){
   const tf=$("period").value,id=++desk.serial;
-  if(f.perp&&tf==="1s")return;
+  if(tf==="1s")return;
   try{
-    const rows=await jsonFrom(f.perp?FUT:SPOT,(f.perp?"/fapi/v1":"/api/v3")+"/klines?"+new URLSearchParams({symbol:f.s,interval:tf,limit:300}),f);
+    const rows=await jsonFrom(FUT,"/fapi/v1/klines?"+new URLSearchParams({symbol:f.s,interval:tf,limit:300}),f);
     if(feed!==f||id!==desk.serial)return;
     f.ohlc=rows.map(candle);updateSeries(f);
   }catch{/* On a restricted endpoint the observed trades supply the price series. */}
@@ -767,7 +767,7 @@ function paintDesk(){
   function rect(x,y,w,h,col){c.fillStyle=col;c.fillRect(x,y,w,h);}
   function text(s,x,y,col="#c8c5b7"){c.fillStyle=col;c.fillText(s,x,y);}
   const f=feed,bs=desk.series,tf=$("period").value,on=k=>layers.has(k);
-  $("marketTitle").textContent=$("pair").value+" · "+($("venue").value==="spot"?"Spot":"Perpetual")+" · "+tf;
+  $("marketTitle").textContent=$("pair").value+" · "+"USDT Perpetual"+" · "+tf;
   if(!f||!bs.length){desk.g=null;$("ohlc").textContent="Waiting for exchange data…";$("chartNote").textContent="";return;}
   let end=desk.end===null?bs.length-1:bs.findIndex(b=>b.time>=desk.end);if(end<0)end=bs.length-1;
   const count=desk.count,start=end-count+1,from=Math.max(0,start),visible=bs.slice(from,end+1);
@@ -834,8 +834,8 @@ function paintDesk(){
   });
   if(on("vwap"))curve(b=>b.avg,colors.gold);if(on("bands"))for(const n of [-1,1])curve(b=>b.avg+n*b.sd,"#c8aa68",[3,3]);
   if(on("side")){curve(b=>b.bv,colors.up);curve(b=>b.sv,colors.down);}
-  if(on("liq")&&f.perp)for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
-  if(on("model")&&f.perp)for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
+  if(on("liq"))for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
+  if(on("model"))for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
   const last=bs[end];
   line(l,y(last.close),R,y(last.close),"#aaa691",[2,4]);
   if(on("setup")){
