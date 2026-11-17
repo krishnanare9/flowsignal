@@ -44,6 +44,11 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 #terminal{padding:12px;background:#11110e}#terminal.wide{position:fixed;inset:0;z-index:10;margin:0;overflow:auto}
 #terminal.wide canvas{height:calc(100dvh - 175px);min-height:300px}.chartTools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px}.chartTools strong{margin-right:auto}.chartTools button,.chartTools summary{font-size:13px;padding:5px 9px;cursor:pointer}.chartTools button[aria-pressed=true]{border-color:var(--gold);color:var(--gold)}#plot{height:clamp(370px,56vh,700px);touch-action:none;cursor:crosshair}
 #ohlc,#scale{font:12px/1.8 ui-monospace,monospace;color:#cdc8b7}#studies{position:relative}#layers{position:absolute;top:100%;right:0;z-index:5;background:#23211a;padding:10px;border:1px solid #665e45;width:min(270px,80vw);max-height:48vh;overflow:auto}#layers label{display:flex;gap:8px;align-items:center;padding:3px}#layers input{width:auto;accent-color:#d4af37}@media(max-width:600px){#terminal{padding:5px}#plot{height:440px}#layers{right:-30px}}
+/* The provider sets inline height:100%; keep a definite viewport height. */
+#brokerChart{height:76vh!important;height:76dvh!important;min-height:480px;width:100%!important}
+#brokerChart:fullscreen{height:100vh!important;height:100dvh!important;min-height:0}
+#brokerChart>iframe{height:calc(100% - 32px)!important;width:100%!important;display:block;border:0}
+@media(max-width:600px){#brokerChart{height:72vh!important;height:72dvh!important;min-height:400px}}
 </style>
 </head>
 <body><main>
