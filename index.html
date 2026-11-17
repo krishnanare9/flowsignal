@@ -184,7 +184,7 @@ for (const frame of intervals) {
 }
 function paintFrame(frame) {
   const item=results.get(frame), badge=buttons.get(frame).lastElementChild;
-  const state=item?.error?"Offline":item?.data?.a?.label || (item?"N/A":"…");
+  const state=item?.error?(item.error.startsWith("Warming up")?"Warming up":"Offline"):item?.data?.a?.label || (item?"N/A":"…");
   badge.textContent=state;
   badge.style.color=({BUY:colors.up,SELL:colors.down,WATCH:colors.gold})[state] || colors.dim;
 }
@@ -360,7 +360,7 @@ function render() {
   $("verdict").textContent=a?.label ?? "—";
   $("verdict").style.color=({BUY:colors.up,SELL:colors.down,WATCH:colors.gold})[a?.label] || colors.dim;
   $("summary").textContent=directional?(a.buy?"Long":"Short")+" · Closed "+new Date(snapshot.closed.at(-1).end).toLocaleTimeString():
-    a?"Tied scores · No leading side":snapshot?"No volume profile available":"Awaiting market data";
+    a?"Tied scores · No leading side":snapshot?"Collecting closed candles for signal":"Awaiting market data";
   $("scores").textContent=a?"Long "+a.L+"/5 · Short "+a.S+"/5":"—";
   $("checks").replaceChildren(); $("levels").replaceChildren();
   if (directional) {
@@ -406,7 +406,11 @@ async function run(reset=false) {
         const candles=await load(symbol,frame), closed=candles.slice(0,-1);
         const p=profile(closed);
         item={time:new Date().toLocaleTimeString(),data:{symbol,candles,closed,p,a:analyse(closed,p)}};
-      } catch (error) { item={error:error.message}; }
+      } catch (error) {
+        item={error:error.message};
+        const partial=contiguousCandles(cachedCandles(symbol,frame));
+        if(partial.length){const closed=partial.filter(c=>c.end<Date.now());item.data={symbol,candles:partial,closed,p:profile(closed),a:null};}
+      }
       if (id!==generation) return;
       results.set(frame,item);
       paintFrame(frame);
@@ -579,7 +583,7 @@ async function startOKX(){
   $("venue").innerHTML='<option>OKX · USDT perpetual fallback</option>';
   $("barPick").replaceChildren();
   $("connectionDetails").hidden=false;
-  $("connectionDetails").textContent="Binance connection unavailable. Chart uses OKX USDT perpetual data. Scanner and paper bot require Binance history. Historical OKX candles have no taker delta; footprint and CVD use captured OKX trades.";
+  $("connectionDetails").textContent="Binance connection unavailable. Chart uses OKX USDT perpetual data. Scanner and paper bot collect Binance candles independently. Historical OKX candles have no taker delta; footprint and CVD use captured OKX trades.";
   // Start history independently so contract metadata cannot delay the chart.
   repeat(f,()=>okxHistory(f),15000);
   repeat(f,async()=>{
