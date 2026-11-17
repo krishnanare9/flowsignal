@@ -62,7 +62,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <label>Starting balance (USDT)<input id="botCapital" type="number" min="0.01" step="any" value="1000"></label>
 <label>Risk per trade (%)<input id="botRisk" type="number" min="0.01" max="1" step="0.01" value="1"></label>
 <button id="botStart">Start paper bot</button><button id="botPause">Pause entries</button></div>
-<p id="botState" role="status"></p><p id="botEquity"></p><p id="botOpen"></p>
+<p class="muted">Signals need 21 consecutive closed Binance candles plus the current candle. If history is blocked, live candles build this history while the page stays open (about 21 minutes on 1m, 105 minutes on 5m). Chart-provider prices alone cannot supply scanner delta.</p><p id="botState" role="status"></p><p id="botEquity"></p><p id="botOpen"></p>
 <details><summary>Execution rules</summary><p>BUY/SELL on a newly closed candle (4/5 or 5/5). Entry is simulated at the next candle open. Stop uses the scanner level. Exit fully at POC if it offers ≥1.5R, otherwise at the VA edge if it qualifies. One position at a time. Maximum three entries or three losses per IST day.</p>
 <p>Prices are futures contract prices. Candle simulation assumes stop first when both exits are touched. Gaps can increase losses. P&amp;L excludes fees, funding and slippage. Keep this page open for new entries. Saved positions reconcile against available candle history after reopening.</p></details>
 <h3>Paper trade history</h3><div class="scroll"><table><thead><tr><th>Entry (IST)</th><th>Contract / TF</th><th>Side</th><th>Entry</th><th>SL</th><th>Target</th><th>Coins</th><th>R:R</th><th>Exit</th><th>P&L (USDT)</th></tr></thead><tbody id="botHistory"></tbody></table></div></article></details>
@@ -96,7 +96,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <output id="size"></output><p><small>Uses stop distance and assumes 1 USDT ≈ $1. Excludes fees and slippage.</small></p></article>
 </section>
 <section id="flow" hidden aria-label="Order flow">
-<div class="controls"><label>Binance market<select id="venue" disabled><option value="perp">USDⓈ-M perpetual</option></select></label>
+<div class="controls"><label>Chart data source<select id="venue" disabled><option value="perp">USDⓈ-M perpetual</option></select></label>
 <label>Symbol<select id="pair"></select></label><label>Interval<select id="period"></select></label>
 <label>Price row<select id="rowSize"><option value="0">Auto</option><option>0.0001</option><option>0.001</option><option>0.01</option><option>0.1</option><option>1</option><option>10</option><option>100</option></select></label></div>
 <figure id="terminal">
@@ -167,6 +167,7 @@ function selectFrame() {
   if(replay && replay.symbol===$("symbol").value && replay.frame===$("interval").value)return;
   replay=null;
   const selected=$("interval").value;
+  if(!$("scanner").hidden)watchCandles("scanner",$("symbol").value,selected);
   const item=results.get(selected);
   snapshot=item?.data ?? null;replayControls();
   $("status").textContent=item?.error || (item ? "Live • "+item.time : "Loading…");
@@ -198,24 +199,106 @@ function candle(row) {
   return {time,open,high,low,close,volume,end,delta:2*buy-volume};
 }
 
-async function load(symbol,interval) {
-  const path = "/fapi/v1/klines?"+new URLSearchParams({symbol,interval,limit:300});
-  for (const host of FUT) {
-    const controller = new AbortController();
-    const timer = setTimeout(()=>controller.abort(),6500);
-    try {
-      const response = await fetch(host+path,{signal:controller.signal,cache:"no-store"});
-      if (!response.ok) throw Error("HTTP "+response.status);
-      const rows = (await response.json()).map(candle);
-      if (rows.length<22 || rows.some((c,i)=>i>0 && c.time<=rows[i-1].end))
-        throw Error("Incomplete history");
-      return rows;
-    } catch (error) {
-      console.warn(host,error.message);
-    } finally { clearTimeout(timer); }
+
+const candleBuffers=new Map(),candleStreams=new Map(),streamOwners=new Map();
+let historyRetryAt=0;
+function candleKey(symbol,frame){return symbol+"/"+frame;}
+function cachedCandles(symbol,frame){
+  const key=candleKey(symbol,frame);
+  if(!candleBuffers.has(key)){
+    let rows=[];
+    try{
+      const saved=JSON.parse(localStorage.getItem("flowsignal.candles."+key)||"[]");
+      if(Array.isArray(saved))rows=saved.map(c=>candle([c.time,c.open,c.high,c.low,c.close,c.volume,c.end,0,0,(c.delta+c.volume)/2]));
+    }catch{}
+    candleBuffers.set(key,rows);
   }
-  throw Error("Data unavailable. Check internet/VPN or open via a web server.");
+  return candleBuffers.get(key);
 }
+function rememberCandles(symbol,frame,rows){
+  const key=candleKey(symbol,frame),merged=new Map(cachedCandles(symbol,frame).map(c=>[c.time,c]));
+  for(const row of rows)merged.set(row.time,row);
+  const ordered=[...merged.values()].sort((a,b)=>a.time-b.time).slice(-300);
+  candleBuffers.set(key,ordered);
+  return ordered;
+}
+function contiguousCandles(rows){
+  let first=rows.length-1;
+  while(first>0&&rows[first].time===rows[first-1].end+1)first--;
+  return rows.slice(Math.max(0,first));
+}
+function persistCandles(symbol,frame){
+  try{localStorage.setItem("flowsignal.candles."+candleKey(symbol,frame),JSON.stringify(cachedCandles(symbol,frame)));}
+  catch{/* The active tab can continue collecting if storage is full. */}
+}
+function watchCandles(owner,symbol,frame){
+  const key=symbol?candleKey(symbol,frame):null;
+  if(key)streamOwners.set(owner,key);else streamOwners.delete(owner);
+  for(const [id,stream] of candleStreams){
+    if(![...streamOwners.values()].includes(id)){
+      stream.stopped=true;clearTimeout(stream.retry);clearTimeout(stream.timeout);stream.socket?.close();candleStreams.delete(id);
+    }
+  }
+  if(!key||candleStreams.has(key))return;
+  const stream={state:"Connecting",stopped:false,lastSeen:0};
+  candleStreams.set(key,stream);cachedCandles(symbol,frame);
+  function connect(){
+    if(stream.stopped)return;
+    const socket=stream.socket=new WebSocket("wss://fstream.binance.com/market/ws/"+symbol.toLowerCase()+"@kline_"+frame);
+    stream.timeout=setTimeout(()=>{stream.state="Timed out";socket.close();},12000);
+    socket.onopen=()=>{clearTimeout(stream.timeout);stream.state="Connected";};
+    socket.onerror=()=>{stream.state="Connection failed";};
+    socket.onmessage=event=>{
+      try{
+        const k=JSON.parse(event.data).k;if(!k)return;
+        const c=candle([k.t,k.o,k.h,k.l,k.c,k.v,k.T,0,0,k.V]);
+        stream.lastSeen=Date.now();stream.state="Live";
+        rememberCandles(symbol,frame,[c]);
+        if(k.x||!stream.lastSave||Date.now()-stream.lastSave>15000){
+          persistCandles(symbol,frame);stream.lastSave=Date.now();
+        }
+      }catch(e){stream.state="Invalid candle data";}
+    };
+    socket.onclose=()=>{
+      clearTimeout(stream.timeout);
+      if(!stream.stopped){stream.state="Reconnecting";stream.retry=setTimeout(connect,5000);}
+    };
+  }
+  connect();
+}
+function streamInfo(symbol,frame){
+  const state=candleStreams.get(candleKey(symbol,frame));
+  return state?state.state+(state.lastSeen?" · "+new Date(state.lastSeen).toLocaleTimeString():""):"Awaiting data";
+}
+async function futuresCandles(symbol,frame,startTime){
+  let rows=cachedCandles(symbol,frame);
+  const key=candleKey(symbol,frame),stream=candleStreams.get(key),fresh=stream?.lastSeen>Date.now()-15000;
+  const recent=contiguousCandles(rows),complete=recent.filter(c=>c.end<Date.now()).length>=21;
+  if(Date.now()>=historyRetryAt && !(fresh&&complete&&startTime===undefined)){
+    try{
+      const query=new URLSearchParams({symbol,interval:frame,limit:300});
+      if(startTime!==undefined)query.set("startTime",String(startTime));
+      const response=await fetch(FUT[0]+"/fapi/v1/klines?"+query,{cache:"no-store",signal:AbortSignal.timeout(6500)});
+      if(!response.ok)throw Error("HTTP "+response.status);
+      const incoming=(await response.json()).map(candle);
+      if(!incoming.length)throw Error("Empty futures history");
+      rows=rememberCandles(symbol,frame,incoming);persistCandles(symbol,frame);
+      if(startTime!==undefined)return incoming;
+    }catch{historyRetryAt=Date.now()+60000;}
+  }
+  if(startTime!==undefined){
+    const retained=rows.filter(c=>c.time>=startTime);
+    if(retained[0]?.time!==startTime)throw Error("Position history missing; waiting for Binance history to reconcile SL/TP");
+    return retained;
+  }
+  rows=contiguousCandles(rows);
+  const closed=rows.filter(c=>c.end<Date.now()).length;
+  const last=rows.at(-1),now=Date.now();
+  if(closed<21||!last||last.end<now||last.time>now)
+    throw Error("Warming up Binance "+frame+" · "+Math.min(closed,21)+"/21 closed candles · "+streamInfo(symbol,frame));
+  return rows;
+}
+async function load(symbol,interval){return futuresCandles(symbol,interval);}
 
 function profile(rows) {
   if (!rows.length) return null;
@@ -1043,6 +1126,7 @@ function view(learn) {
   $("marketCharts").hidden=true;$("marketTab").setAttribute("aria-pressed","false");$("paperPanel").hidden=false;
   desk.fromScanner=!learn;
   if(feed)stopFlow();
+  if(learn)watchCandles("scanner",null);else watchCandles("scanner",$("symbol").value,$("interval").value);
   $("flow").hidden=true;
   $("flowTab").setAttribute("aria-pressed","false");
   $("scanner").hidden=learn; $("learn").hidden=!learn;
@@ -1051,6 +1135,7 @@ function view(learn) {
   if (!learn) draw();
 }
 $("flowTab").onclick=()=>{
+  watchCandles("scanner",null);
   $("marketCharts").hidden=true;$("marketTab").setAttribute("aria-pressed","false");$("paperPanel").hidden=false;
   if (!$("flow").hidden)return;
   $("scanner").hidden=$("learn").hidden=true;$("flow").hidden=false;
@@ -1093,7 +1178,7 @@ function savePaper(b){localStorage.setItem(paperKey,JSON.stringify(b));}
 function paperOrder(a,entry,b){
   if(!a||!["BUY","SELL"].includes(a.label)||!(entry>0))return null;
   const sign=a.buy?1:-1, distance=sign*(entry-a.stop);
-  if(!(distance>0)||!(b.balance>0))return null;
+  if(!(distance>0)||!(b.balance>0)||!(b.risk>0&&b.risk<=1))return null;
   const target=[a.tp1,a.tp2].find(t=>sign*(t-entry)/distance>=1.5);
   if(!Number.isFinite(target))return null;
   const qty=b.balance*(b.risk/100)/distance;
@@ -1117,12 +1202,10 @@ function settlePaper(b,bar){
   b.last=Math.max(b.last,p.time,bar.time);b.balance+=pnl;b.open=null;return true;
 }
 async function paperBars(b){
+  b.checkedAt=Date.now();watchCandles("paper",b.pair,b.frame);
   // Resume an older position from its last inspected candle before processing live signals.
   if(b.open){
-    const q=new URLSearchParams({symbol:b.pair,interval:b.frame,startTime:b.open.cursor,limit:300});
-    const res=await fetch(FUT[0]+"/fapi/v1/klines?"+q,{cache:"no-store",signal:AbortSignal.timeout(8000)});
-    if(!res.ok)throw Error("Futures history unavailable");
-    const rows=(await res.json()).map(candle);
+    const rows=await futuresCandles(b.pair,b.frame,b.open.cursor);
     if(!rows.length||rows[0].time!==b.open.cursor)throw Error("Missing candle history; position reconciliation pending");
     let expected=b.open.cursor;
     for(const c of rows){
@@ -1131,13 +1214,14 @@ async function paperBars(b){
       b.open.cursor=c.time;expected=c.end+1;
     }
     if(b.open&&rows.length===300&&rows.at(-1).end<Date.now())b.open.cursor=expected;
-    b.note=b.open?"Monitoring SL and target.":"Paper position closed.";
+    b.note=b.open?(rows.at(-1).end<Date.now()?"Position open · waiting for current candles; exits cannot be confirmed yet.":"Monitoring SL and target · "+streamInfo(b.pair,b.frame)):"Paper position closed.";
     return;
   }
   if(!b.active)return;
   const rows=await load(b.pair,b.frame), live=rows.at(-1),closed=rows.slice(0,-1),last=closed.at(-1);
   const now=Date.now();
-  if(live.time!==last.end+1||now<live.time||now>live.end||live.time<=b.since||live.time<=b.last)return;
+  if(live.time!==last.end+1||now<live.time||now>live.end)throw Error("Waiting for current contiguous candles");
+  if(live.time<=b.since||live.time<=b.last){b.note="Watching next close · "+paperTime(live.end+1)+(b.decision?" · "+b.decision:"");return;}
   b.last=live.time;
   if(now-live.time>45000){b.note="Skipped late signal. Waiting for next close.";return;}
   const day=istDay(live.time);
@@ -1145,7 +1229,7 @@ async function paperBars(b){
     b.note="Daily cap reached (IST).";return;
   }
   const a=analyse(closed,profile(closed)),order=paperOrder(a,live.open,b);
-  if(!order){b.note="Last close: "+(a?.label||"WAIT")+" · no qualifying entry.";return;}
+  if(!order){b.decision="Last close "+(a?.label||"WAIT")+" · Long "+(a?.L??0)+"/5, Short "+(a?.S??0)+"/5"+(["BUY","SELL"].includes(a?.label)?" · skipped: target below 1.5R or invalid stop":"");b.note=b.decision;return;}
   b.open={...order,pair:b.pair,frame:b.frame,time:live.time,cursor:live.time};
   b.note="Paper position opened.";
   if(settlePaper(b,live))b.note="Paper position opened and closed within entry candle.";
@@ -1159,7 +1243,7 @@ function showPaper(b){
     $("botCapital").value=b.seed;
     if(frozen){$("botPair").value=b.pair;$("botFrame").value=b.frame;$("botRisk").value=b.risk;}
   }
-  $("botState").textContent=(b?.active?"Running":b?.open?"Entries paused · managing position":"Stopped")+" · "+(b?.note||"Choose a contract and start.");
+  $("botState").textContent=(b?.active?"Running":b?.open?"Entries paused · managing position":"Stopped")+" · "+(b?.note||"Choose a contract and start.")+(b?.checkedAt?" · Checked "+paperTime(b.checkedAt):"");
   $("botEquity").textContent=b?"Realized balance "+price(b.balance)+" USDT · closed P&L "+price(b.balance-b.seed)+" USDT":"";
   const p=b?.open;
   $("botOpen").textContent=p?[p.pair,p.frame,p.sign===1?"LONG":"SHORT","Entry "+price(p.entry),"SL "+price(p.stop),"TP "+price(p.target),price(p.qty)+" coins","1:"+p.rr.toFixed(2)].join(" · "):"No open paper position.";
@@ -1181,15 +1265,18 @@ async function paperAction(mode){
         b??={seed,balance:seed,history:[],open:null};
         Object.assign(b,{active:true,pair:$("botPair").value,frame:$("botFrame").value,risk,since:Date.now(),last:0,note:"Waiting for next closed candle."});
       }else if(mode==="pause"&&b){b.active=false;b.note=b.open?"Open trade still managed.":"Entries paused.";}
-      else if(mode==="tick"&&(b?.active||b?.open)){await paperBars(b);}
+      else if(mode==="tick"&&(b?.active||b?.open)){
+        try{await paperBars(b);}catch(e){b.note=e.message;}
+      }
       else {showPaper(b);return;}
       savePaper(b);showPaper(b);
+      watchCandles("paper",b.active||b.open?b.pair:null,b.frame);
     });
   }catch(e){$("botState").textContent="Paper bot · "+e.message+". Check data or browser storage.";}
 }
 $("botPair").innerHTML=$("symbol").innerHTML;$("botFrame").innerHTML=$("interval").innerHTML;$("botFrame").value="5m";
 $("botStart").onclick=()=>paperAction("start");$("botPause").onclick=()=>paperAction("pause");
-function refreshPaper(){try{showPaper(readPaper());}catch(e){$("botState").textContent=e.message;}}
+function refreshPaper(){try{const b=readPaper();showPaper(b);watchCandles("paper",b?.active||b?.open?b.pair:null,b?.frame);}catch(e){$("botState").textContent=e.message;}}
 window.addEventListener("storage",e=>{if(e.key===paperKey)refreshPaper();});
 refreshPaper();paperAction("tick");setInterval(()=>paperAction("tick"),10000);
 
@@ -1217,7 +1304,7 @@ function loadMarketChart(){
   script.src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";script.async=true;
   script.textContent=JSON.stringify({
     autosize:true,symbol,interval:$("marketFrame").value,timezone:"Asia/Kolkata",theme:"dark",style:"1",locale:"en",
-    allow_symbol_change:true,hide_top_toolbar:false,hide_side_toolbar:false,withdateranges:true,save_image:true,
+    allow_symbol_change:false,hide_top_toolbar:false,hide_side_toolbar:false,withdateranges:true,save_image:true,
     details:true,calendar:false,hotlist:false,hide_volume:forex,support_host:"https://www.tradingview.com",
     watchlist:marketLists[$("assetMarket").value].map(x=>x[0])
   });
@@ -1226,6 +1313,7 @@ function loadMarketChart(){
   host.append(script);marketLoaded=true;
 }
 $("marketTab").onclick=()=>{
+  watchCandles("scanner",null);
   if(feed)stopFlow();
   for(const id of ["scanner","flow","learn"])$(id).hidden=true;
   $("marketCharts").hidden=false;
