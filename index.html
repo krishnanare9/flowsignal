@@ -79,7 +79,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <article><h2>Resting liquidity heatmap</h2><p id="depthCaption"></p><div id="depthMap"></div><small>Top 20 levels per side sampled about every 5s. Green = bids, red = asks. Brighter cells show larger visible quantities.</small></article>
 <article><h2>Time &amp; sales</h2><div id="tape"></div></article>
 <article><h2>Power trades</h2><div class="controls"><label>Minimum print (USDT)<input type="number" value="50000" min="1" id="minPrint"></label></div><div id="power"></div><small>Binance aggregate trade prints. One print can include several fills.</small></article>
-<article><h2>Perpetual funding &amp; open interest</h2><p id="fstats"></p><div id="oiMap"></div><div id="fundHistory" class="scroll"></div><small>Binance USDⓈ-M context for the selected symbol. OI heatmap shows open contracts over time. Funding history shows settled rates.</small></article>
+<article><h2>Perpetual funding &amp; open interest</h2><p id="fstats"></p><div id="oiMap"></div><div id="fundHistory" class="scroll"></div><small>Binance USDⓈ-M mark and funding. History panels identify the exchange; Bybit linear history or observed OKX swap OI can appear as labeled. OI heatmap shows open contracts over time. Funding history shows settled rates.</small></article>
 <article><h2>Reported liquidations</h2><p id="liqStatus"></p><div id="liqMap"></div><div id="liqTape"></div><small>Binance USDⓈ-M publishes sampled forced-order snapshots. Heatmap shows reported fills by time and price. Future liquidation levels are unknown.</small></article>
 <article><h2>Hypothetical leverage levels</h2><label>Assumed leverage<select id="leverage"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label><div id="scenario"></div><small>Illustration using each 5m perpetual close as an assumed entry. Green = assumed long, red = assumed short. Distance = entry / leverage. Brightness uses candle volume as a proxy. Actual positions, margin mode, fees and maintenance margin are unknown. These are simplified bankruptcy levels.</small></article>
 <article><h2>Exchange comparison</h2><div id="quotes"></div><p id="daily"></p><small>Spot last prices. Coinbase uses USD, Binance and Bybit use USDT. Quotes are sampled independently.</small></article>
@@ -432,6 +432,15 @@ function startFlow(){
   $("barPick").replaceChildren();$("alertMsg").textContent="";$("anchor").value="";
   const stream=s.toLowerCase(),route="wss://fstream.binance.com/market/ws/";
   connect(f,(perp?route:"wss://data-stream.binance.vision/ws/")+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
+  connect(f,route+stream+"@markPrice@1s","markWire",d=>{
+    if(+d.p>0 && Number.isFinite(+d.r)){
+      f.markTick={markPrice:d.p,lastFundingRate:d.r,time:+d.E};
+      checkAlert(f,"funding",100*Number(d.r),+d.E);
+    }
+  });
+  if(perp)connect(f,"wss://fstream.binance.com/public/ws/"+stream+"@bookTicker","bboWire",d=>{
+    if(+d.b>0 && +d.a>0)f.bbo={t:+d.E,b:[[+d.b,+d.B]],a:[[+d.a,+d.A]],best:true};
+  });
   connect(f,route+stream+"@forceOrder","force",d=>{
     const o=d.o;
     if(o && +o.ap>0 && +o.z>0){f.liqs.push({t:+o.T,p:+o.ap,q:+o.z,buy:o.S==="BUY"});if(f.liqs.length>500)f.liqs.shift();}
@@ -446,7 +455,9 @@ function startFlow(){
       const b={t:Date.now(),b:levels(d.bids),a:levels(d.asks)};
       if(!b.b.length||!b.a.length)throw Error();
       f.books.push(b);if(f.books.length>60)f.books.shift();f.bookTime=b.t;f.bookError=false;
-    }catch{f.bookError=true;}
+    }catch{f.bookError=true;if(f.bbo && Date.now()-f.bbo.t<15000){
+      f.books.push(f.bbo);if(f.books.length>60)f.books.shift();
+    }}
   },5000);
   repeat(f,async()=>{
     const specs=[
@@ -457,6 +468,23 @@ function startFlow(){
     await Promise.all(specs.map(async([key,path,query])=>{
       try{f[key]=await futures(path,query);}catch{f[key]=null;}
     }));f.futTime=Date.now();checkAlert(f,"funding",100*Number(f.mark?.lastFundingRate),f.futTime);
+  },60000);
+  repeat(f,async()=>{
+    const get=async(path)=>{const d=await jsonFrom(["https://api.bybit.com"],"/v5/market/"+path+"&category=linear&symbol="+s,f);
+      if(d.retCode!==0||!Array.isArray(d.result?.list))throw Error();return d.result.list;};
+    const jobs=[
+      ["otherOI","open-interest?intervalTime=5min&limit=48",a=>a.map(x=>({sumOpenInterest:x.openInterest,timestamp:+x.timestamp})).sort((x,y)=>x.timestamp-y.timestamp)],
+      ["otherFund","funding/history?limit=8",a=>a.map(x=>({fundingTime:+x.fundingRateTimestamp,fundingRate:x.fundingRate})).sort((x,y)=>x.fundingTime-y.fundingTime)]
+    ];
+    await Promise.all(jobs.map(async([key,path,normalize])=>{try{f[key]=normalize(await get(path));}catch{f[key]=null;}}));
+  },60000);
+  repeat(f,async()=>{
+    try{
+      const inst=s.replace("USDT","-USDT-SWAP");
+      const d=await jsonFrom(["https://www.okx.com"],"/api/v5/public/open-interest?instType=SWAP&instId="+inst,f);
+      const tick=d.data?.[0],value=Number(tick?.oiCcy);
+      if(value>0){f.okOI??=[];f.okOI.push({sumOpenInterest:value,timestamp:+tick.ts});if(f.okOI.length>48)f.okOI.shift();}
+    }catch{}
   },60000);
   repeat(f,async()=>{try{f.day=await api("ticker/24hr");}catch{f.day=null;}},30000);
   repeat(f,async()=>{
@@ -603,16 +631,25 @@ function paintFlow(){
     for(const id of ["ladder","zones","barStats","profileStats","vprofile","vwap","bars","cvdPlot","tape","power"])$(id).textContent="Waiting for observed trades…";
   }
   const book=f.books.at(-1);
-  $("bookStamp").textContent=book?"Snapshot "+clock(book.t)+(f.bookError?" · stale":""):(f.bookError?"Depth unavailable":"Loading depth…");
+  $("bookStamp").textContent=book?"Snapshot "+clock(book.t)+(book.best?" · best bid/ask only":f.bookError?" · stale":""):(f.bookError?"Depth unavailable":"Loading depth…");
   put("dom",["Bid qty","Bid","Ask","Ask qty"],book?book.b.slice(0,10).map(([p,q],i)=>[fmt(q),fmt(p),fmt(book.a[i]?.[0]),fmt(book.a[i]?.[1])]):[]);
   $("depthCaption").textContent=book?clock(f.books[0].t)+" → "+clock(book.t):"";
   heat("depthMap",f.books.map(b=>[...b.b.map(([p,q])=>({p,q,buy:true})),...b.a.map(([p,q])=>({p,q,buy:false}))]),"oldest → newest");
-  const leverage=+$("leverage").value,model=Array.isArray(f.model)?f.model:[];
-  heat("scenario",model.filter(k=>+k[4]>0 && +k[5]>0).map(k=>[true,false].map(buy=>({p:+k[4]*(1+(buy?-1:1)/leverage),buy,q:+k[5]}))),"illustrative levels · oldest → newest");
-  const rates=Array.isArray(f.fund)?f.fund:[],oi=Array.isArray(f.oiHist)?f.oiHist:[];
-  $("fstats").textContent=(f.futTime?clock(f.futTime):"Loading")+" · Mark "+fmt(+f.mark?.markPrice)+" · Funding "+fmt(100*Number(f.mark?.lastFundingRate))+"% · Open interest "+fmt(+f.oi?.openInterest)+" coins";
-  spark("oiMap",oi.map(r=>+r.sumOpenInterest).filter(Number.isFinite),"OI heat · 5m samples, oldest → newest");
-  put("fundHistory",["Settlement","Rate %"],rates.slice().reverse().map(r=>[when(r.fundingTime),fmt(100*Number(r.fundingRate))]),"Funding history unavailable");
+  const leverage=+$("leverage").value;
+  let model=Array.isArray(f.model)?f.model:[];
+  const modeledFromPrints=!model.length && f.perp;
+  if(modeledFromPrints){
+    const observed=new Map();
+    for(const t of trades){const k=bucket(t.t,"5m"),r=observed.get(k)||[k,0,0,0,t.p,0];r[4]=t.p;r[5]+=t.q;observed.set(k,r);}
+    model=[...observed.values()];
+  }
+  heat("scenario",model.filter(k=>+k[4]>0 && +k[5]>0).map(k=>[true,false].map(buy=>({p:+k[4]*(1+(buy?-1:1)/leverage),buy,q:+k[5]}))),(modeledFromPrints?"retained prints":"5m klines")+" · illustrative levels · oldest → newest");
+  const rates=f.fund?.length?f.fund:f.otherFund||[],oi=f.oiHist?.length?f.oiHist:f.otherOI?.length?f.otherOI:(f.okOI||[]).filter(r=>r.timestamp>Date.now()-3600000);
+  const oiVenue=f.oiHist?.length?"Binance":f.otherOI?.length?"Bybit":"OKX",fundVenue=f.fund?.length?"Binance":"Bybit";
+  const mark=f.markTick && Date.now()-f.markTick.time<15000 ? f.markTick : f.mark;
+  $("fstats").textContent=(f.futTime?clock(f.futTime):"Loading")+" · Binance mark "+fmt(+mark?.markPrice)+" · Funding "+fmt(100*Number(mark?.lastFundingRate))+"% · OI "+(f.oi?"Binance "+fmt(+f.oi.openInterest):oi.length?oiVenue+" "+fmt(+oi.at(-1).sumOpenInterest):"unavailable")+" coins";
+  spark("oiMap",oi.map(r=>+r.sumOpenInterest).filter(Number.isFinite),oiVenue+" OI heat · "+(oiVenue==="OKX"?"session samples":"5m samples")+", oldest → newest");
+  put("fundHistory",["Settlement · "+(rates.length?fundVenue:"—"),"Rate %"],rates.slice().reverse().map(r=>[when(r.fundingTime),fmt(100*Number(r.fundingRate))]),"Funding history unavailable");
   $("liqStatus").textContent=f.force+" · "+f.liqs.length+" retained snapshots · BUY = forced short close, SELL = forced long close.";
   const now=Date.now(),slots=Array.from({length:30},()=>[]);
   for(const t of f.liqs){const i=29-(Math.floor(now/60000)-Math.floor(t.t/60000));if(i>=0&&i<30)slots[i].push(t);}
