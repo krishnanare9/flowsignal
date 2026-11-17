@@ -689,7 +689,7 @@ $("arm").onclick=()=>{
 // Build one chronological series for every overlay. Footprint rows only use observed trades.
 const desk={foot:true,count:7,end:null,sy:1,hover:null,marks:[],tool:"",first:null,pointers:new Map(),series:[],serial:0};
 const layers=new Set(),surface=$("plot"),bound=(x,a,b)=>Math.min(b,Math.max(a,x));
-const choices=[["heat","Resting liquidity heatmap",1],["imb","Diagonal imbalance",1],["stack","Stacked imbalance zones"],["abs","Possible absorption"],["profile","Volume profile / POC / VA",1],["tpo","TPO profile"],["vwap","VWAP"],["bands","VWAP bands"],["side","Buy and sell VWAP"],["large","Large trade markers"],["liq","Reported liquidations (perp)"],["model","Hypothetical leverage levels (perp)"],["fvg","Fair value gaps"],["sweep","Liquidity sweeps"],["ob","Order block candidates"],["volume","Volume"],["delta","Delta",1],["cvd","CVD"],["oi","Open interest"],["fund","Funding rate"]];
+const choices=[["heat","Resting liquidity heatmap",1],["imb","Diagonal imbalance",1],["stack","Stacked imbalance zones"],["abs","Possible absorption"],["profile","Volume profile / POC / VA",1],["tpo","TPO profile"],["vwap","VWAP"],["bands","VWAP bands"],["side","Buy and sell VWAP"],["large","Large trade markers"],["liq","Reported liquidations (perp)"],["model","Hypothetical leverage levels (perp)"],["setup","Scanner entry, stop and targets"],["fvg","Fair value gaps"],["sweep","Liquidity sweeps"],["ob","Order block candidates"],["volume","Volume"],["delta","Delta",1],["cvd","CVD"],["oi","Open interest"],["fund","Funding rate"]];
 for(const [key,name,checked] of choices){
   const l=document.createElement("label"),box=document.createElement("input");box.type="checkbox";box.checked=!!checked;
   if(checked)layers.add(key);box.onchange=()=>{if(box.checked)layers.add(key);else layers.delete(key);paintDesk();};
@@ -836,6 +836,18 @@ function paintDesk(){
   if(on("side")){curve(b=>b.bv,colors.up);curve(b=>b.sv,colors.down);}
   if(on("liq")&&f.perp)for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
   if(on("model")&&f.perp)for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
+  const last=bs[end];
+  line(l,y(last.close),R,y(last.close),"#aaa691",[2,4]);
+  if(on("setup")){
+    const closed=bs.slice(0,end+1).filter(b=>b.history && b.end<Date.now());
+    const signal=analyse(closed,profile(closed));
+    if(signal?.checks && (signal.label==="BUY"||signal.label==="SELL")){
+      for(const [name,p] of [["Entry",signal.entry],["Stop",signal.stop],["TP1",signal.tp1],["TP2",signal.tp2]]){
+        const color=name==="Stop"?colors.down:name==="Entry"?"#86bfff":colors.up;
+        line(l,y(p),R,y(p),color,[5,3]);text(name+" "+fmt(p),l+30,y(p)-2,color);
+      }
+    }
+  }
   for(const mark of desk.marks){if(mark.length===1){const yy=y(mark[0].p);line(l,yy,R,yy,"#78bbef",[4,3]);text(fmt(mark[0].p),l+32,yy-3,"#78bbef");}
     else{const [a,b]=mark;if(Number.isFinite(tx(a.t))&&Number.isFinite(tx(b.t)))line(tx(a.t),y(a.p),tx(b.t),y(b.p),"#78bbef");}}
   if(desk.first)rect(tx(desk.first.t)-2,y(desk.first.p)-2,4,4,"#78bbef");
