@@ -8,7 +8,7 @@
 :root{color-scheme:dark;--bg:#0c0b09;--card:#171612;--line:#39372e;--ink:#f3efe4;--dim:#b8b3a4;--gold:#d4af37;--up:#65d5a0;--down:#ff817a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
-main{max-width:1200px;margin:auto;padding:20px clamp(12px,3vw,36px)}
+main{max-width:1600px;margin:auto;padding:20px clamp(12px,3vw,36px)}
 header,nav,.controls,.heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 header,.heading{justify-content:space-between}
 header{padding-bottom:16px;border-bottom:1px solid var(--line)}
@@ -48,8 +48,9 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 </head>
 <body><main>
 <header><h1>Flow<span>Signal</span></h1><nav aria-label="Views">
+<button id="marketTab" aria-controls="marketCharts" aria-pressed="false">Futures &amp; Forex</button>
 <button id="scanTab" aria-controls="scanner" aria-pressed="true">Scanner</button>
-<button id="flowTab" aria-controls="flow" aria-pressed="false">Trading Chart</button>
+<button id="flowTab" aria-controls="flow" aria-pressed="false">Order Flow</button>
 <button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
 <details id="paperPanel"><summary><strong>Paper bot · USDT futures</strong></summary>
 <article><div class="controls"><label>Contract<select id="botPair"></select></label><label>Signal timeframe<select id="botFrame"></select></label>
@@ -60,6 +61,18 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <details><summary>Execution rules</summary><p>BUY/SELL on a newly closed candle (4/5 or 5/5). Entry is simulated at the next candle open. Stop uses the scanner level. Exit fully at POC if it offers ≥1.5R, otherwise at the VA edge if it qualifies. One position at a time. Maximum three entries or three losses per IST day.</p>
 <p>Prices are futures contract prices. Candle simulation assumes stop first when both exits are touched. Gaps can increase losses. P&amp;L excludes fees, funding and slippage. Keep this page open for new entries. Saved positions reconcile against available candle history after reopening.</p></details>
 <h3>Paper trade history</h3><div class="scroll"><table><thead><tr><th>Entry (IST)</th><th>Contract / TF</th><th>Side</th><th>Entry</th><th>SL</th><th>Target</th><th>Coins</th><th>R:R</th><th>Exit</th><th>P&L (USDT)</th></tr></thead><tbody id="botHistory"></tbody></table></div></article></details>
+<section id="marketCharts" hidden aria-label="Futures and Forex charts">
+<div class="controls">
+<label>Market<select id="assetMarket"><option value="futures">Crypto futures</option><option value="forex">Forex &amp; Gold</option></select></label>
+<label>Instrument<select id="marketSymbol"></select></label>
+<label>Timeframe<select id="marketFrame"><option value="1">1m</option><option value="5">5m</option><option value="15" selected>15m</option><option value="30">30m</option><option value="60">1h</option><option value="240">4h</option><option value="D">1D</option><option value="W">1W</option></select></label>
+<button id="reloadMarket">Reload chart</button><button id="expandMarket">Full screen</button>
+</div>
+<p id="marketInfo" class="muted"></p>
+<div id="brokerChart" style="height:76vh;min-height:480px;margin-top:12px;background:#131722"></div>
+<p><a id="externalChart" target="_blank" rel="noopener">Open this chart on TradingView ↗</a></p>
+<p class="muted">Chart tools include indicators, drawing tools, chart styles and zoom. Provider availability and data delays are shown inside the chart. Forex quotes use the selected provider. FlowSignal scanner, footprint and paper bot cover crypto only. Trading account execution requires a broker.</p>
+</section>
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
 <label>USDⓈ-M perpetual contract<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
@@ -1022,6 +1035,7 @@ surface.onkeydown=e=>{if(!desk.g)return;if(["ArrowLeft","ArrowRight","End","+","
 document.addEventListener("keydown",e=>{if(e.key==="Escape"){tool("");if($("terminal").classList.contains("wide"))$("expand").click();}});
 new ResizeObserver(queuePlot).observe(surface);
 function view(learn) {
+  $("marketCharts").hidden=true;$("marketTab").setAttribute("aria-pressed","false");$("paperPanel").hidden=false;
   desk.fromScanner=!learn;
   if(feed)stopFlow();
   $("flow").hidden=true;
@@ -1032,6 +1046,7 @@ function view(learn) {
   if (!learn) draw();
 }
 $("flowTab").onclick=()=>{
+  $("marketCharts").hidden=true;$("marketTab").setAttribute("aria-pressed","false");$("paperPanel").hidden=false;
   if (!$("flow").hidden)return;
   $("scanner").hidden=$("learn").hidden=true;$("flow").hidden=false;
   for(const id of ["scanTab","learnTab","flowTab"])$(id).setAttribute("aria-pressed",String(id==="flowTab"));
@@ -1173,6 +1188,54 @@ function refreshPaper(){try{showPaper(readPaper());}catch(e){$("botState").textC
 window.addEventListener("storage",e=>{if(e.key===paperKey)refreshPaper();});
 refreshPaper();paperAction("tick");setInterval(()=>paperAction("tick"),10000);
 
-render(); run();$("period").value="1m";$("flowTab").click(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
+
+const marketLists={
+  futures:[["BINANCE:BTCUSDT.P","BTC / USDT perpetual"],["BINANCE:ETHUSDT.P","ETH / USDT perpetual"],["BINANCE:SOLUSDT.P","SOL / USDT perpetual"],["BINANCE:BNBUSDT.P","BNB / USDT perpetual"],["BINANCE:XRPUSDT.P","XRP / USDT perpetual"]],
+  forex:[["OANDA:XAUUSD","Gold / USD"],["OANDA:EURUSD","EUR / USD"],["OANDA:GBPUSD","GBP / USD"],["OANDA:USDJPY","USD / JPY"],["OANDA:AUDUSD","AUD / USD"],["OANDA:USDCAD","USD / CAD"],["OANDA:USDCHF","USD / CHF"],["OANDA:NZDUSD","NZD / USD"],["OANDA:GBPJPY","GBP / JPY"]]
+};
+let marketLoaded=false,marketRender=0;
+function marketOptions(){
+  $("marketSymbol").replaceChildren();
+  for(const [symbol,label] of marketLists[$("assetMarket").value])$("marketSymbol").add(new Option(label,symbol));
+  $("paperPanel").hidden=$("assetMarket").value==="forex";
+  loadMarketChart();
+}
+function loadMarketChart(){
+  const symbol=$("marketSymbol").value,forex=$("assetMarket").value==="forex",version=++marketRender;
+  const host=$("brokerChart");host.replaceChildren();host.className="tradingview-widget-container";
+  const widget=document.createElement("div");widget.className="tradingview-widget-container__widget";widget.style.height="calc(100% - 32px)";
+  const credit=document.createElement("div");credit.className="tradingview-widget-copyright";
+  const link=document.createElement("a");link.href="https://www.tradingview.com/";link.target="_blank";link.rel="noopener";link.textContent="Charts by TradingView";credit.append(link);host.append(widget,credit);
+  $("externalChart").href="https://www.tradingview.com/chart/?symbol="+encodeURIComponent(symbol);
+  $("marketInfo").textContent=(forex?"Forex / gold · OANDA quotes":"Crypto futures · Binance perpetual contracts")+" · Loading chart provider…";
+  const script=document.createElement("script");
+  script.src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";script.async=true;
+  script.textContent=JSON.stringify({
+    autosize:true,symbol,interval:$("marketFrame").value,timezone:"Asia/Kolkata",theme:"dark",style:"1",locale:"en",
+    allow_symbol_change:true,hide_top_toolbar:false,hide_side_toolbar:false,withdateranges:true,save_image:true,
+    details:true,calendar:false,hotlist:false,hide_volume:forex,support_host:"https://www.tradingview.com",
+    watchlist:marketLists[$("assetMarket").value].map(x=>x[0])
+  });
+  script.onload=()=>{if(version===marketRender)$("marketInfo").textContent=(forex?"Forex / gold · OANDA quotes":"Crypto futures · Binance perpetual contracts")+" · Use the chart toolbar for timeframes and indicators.";};
+  script.onerror=()=>{if(version===marketRender)$("marketInfo").textContent="Chart provider could not load. Reload chart or use the TradingView link below.";};
+  host.append(script);marketLoaded=true;
+}
+$("marketTab").onclick=()=>{
+  if(feed)stopFlow();
+  for(const id of ["scanner","flow","learn"])$(id).hidden=true;
+  $("marketCharts").hidden=false;
+  for(const id of ["scanTab","flowTab","learnTab","marketTab"])$(id).setAttribute("aria-pressed",String(id==="marketTab"));
+  $("paperPanel").hidden=$("assetMarket").value==="forex";
+  if(!marketLoaded)marketOptions();
+};
+$("assetMarket").onchange=marketOptions;
+$("marketSymbol").onchange=$("marketFrame").onchange=loadMarketChart;
+$("reloadMarket").onclick=loadMarketChart;
+$("expandMarket").onclick=async()=>{
+  try{if(document.fullscreenElement)await document.exitFullscreen();else await $("brokerChart").requestFullscreen();}
+  catch{$("marketInfo").textContent="Full screen unavailable in this browser. Use the chart link below.";}
+};
+
+render(); run();$("period").value="1m";$("marketTab").click(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
 </script></body></html>
 
