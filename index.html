@@ -83,9 +83,9 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <label>Price row<select id="rowSize"><option value="0">Auto</option><option>0.0001</option><option>0.001</option><option>0.01</option><option>0.1</option><option>1</option><option>10</option><option>100</option></select></label></div>
 <figure id="terminal">
 <div class="chartTools"><strong id="marketTitle">Trading chart</strong><div class="switch"><button id="ct">Candles</button><button id="ft" aria-pressed="true">Footprint</button></div><details id="studies"><summary>Indicators</summary><div id="layers"></div></details><button id="expand">Expand</button></div>
-<div class="chartTools"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">−</button><button id="latest">Latest</button><button id="retryFeed">Reconnect data</button><button id="fit">Reset view</button><button id="level">Draw level</button><button id="trend">Trendline</button><button id="erase">Clear drawings</button><small id="scale"></small></div>
+<div class="chartTools"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">−</button><button id="latest">Latest</button><button id="retryFeed">Reconnect data</button><button id="connectionReport">Connection report</button><button id="fit">Reset view</button><button id="level">Draw level</button><button id="trend">Trendline</button><button id="erase">Clear drawings</button><small id="scale"></small></div>
 <output id="ohlc">Connecting…</output><canvas id="plot" tabindex="0" role="img" aria-label="Interactive price chart with footprint candles, liquidity heatmap and indicators"></canvas><figcaption id="chartNote"></figcaption><small>Wheel or pinch to zoom · drag to pan · drag price axis to scale · hover to inspect a row</small></figure>
-<p id="coverage" class="muted" role="status"></p>
+<pre id="connectionDetails" hidden style="white-space:pre-wrap;overflow-wrap:anywhere" role="status"></pre><p id="coverage" class="muted" role="status"></p>
 <article><div class="heading"><h2>Footprint</h2><label>Candle<select id="barPick"></select></label></div><p id="barStats"></p><div id="ladder" class="scroll"></div>
 <small>Bid = aggressive sells · Ask = aggressive buys · Diagonal imbalance ≥ 3× against a nonzero adjacent row. Contiguous runs of 3+ flag potential support or resistance.</small><p id="zones"></p></article>
 <div class="grid">
@@ -419,9 +419,11 @@ function connect(f,url,key,handle) {
   let ws;
   try {ws=new WebSocket(url);}catch {f[key]="Unavailable";return;}
   f.sockets.add(ws);
-  ws.onopen=()=>{f[key]="Connected";};
+  const timeout=setTimeout(()=>{if(ws.readyState===WebSocket.CONNECTING){f[key]="Connection timed out";ws.close();paintFlow();}},12000);
+  ws.onopen=()=>{clearTimeout(timeout);f[key]="Connected";};
+  ws.onerror=()=>{f[key]="Connection failed";paintFlow();};
   ws.onmessage=e=>{if(feed!==f)return;try{handle(JSON.parse(e.data));}catch{}};
-  ws.onclose=()=>{f.sockets.delete(ws);if(feed===f){f[key]="Reconnecting";schedule(f,()=>connect(f,url,key,handle),5000);}};
+  ws.onclose=e=>{clearTimeout(timeout);f.sockets.delete(ws);if(feed===f){f[key]="Disconnected ("+e.code+") · retrying";schedule(f,()=>connect(f,url,key,handle),5000);}};
 }
 function schedule(f,fn,delay){
   const timer=setTimeout(()=>{f.timers.delete(timer);if(feed===f)fn();},delay);f.timers.add(timer);
@@ -730,7 +732,9 @@ function connectCandles(f){
   const tf=$("period").value;
   if(tf==="1s")return;
   const socket=new WebSocket("wss://fstream.binance.com/market/ws/"+f.s.toLowerCase()+"@kline_"+tf);
-  f.klineSocket=socket;f.sockets.add(socket);
+  f.klineSocket=socket;f.sockets.add(socket);f.candleStatus="Connecting";
+  const timeout=setTimeout(()=>{if(socket.readyState===WebSocket.CONNECTING){f.candleStatus="Connection timed out";socket.close();}},12000);
+  socket.onopen=()=>{clearTimeout(timeout);f.candleStatus="Connected";};
   socket.onmessage=e=>{
     if(feed!==f||$("period").value!==tf)return;
     try{
@@ -741,8 +745,8 @@ function connectCandles(f){
       f.candleLive=Date.now();updateSeries(f);
     }catch(e){console.warn("Candle stream",e.message);}
   };
-  socket.onerror=()=>{f.historyError="Futures connection failed";};
-  socket.onclose=()=>{f.sockets.delete(socket);if(feed===f&&$("period").value===tf)schedule(f,()=>connectCandles(f),5000);};
+  socket.onerror=()=>{f.candleStatus="Connection failed";};
+  socket.onclose=e=>{clearTimeout(timeout);f.candleStatus="Disconnected ("+e.code+") · retrying";f.sockets.delete(socket);if(feed===f&&$("period").value===tf)schedule(f,()=>connectCandles(f),5000);};
 }
 
 function updateSeries(f){
@@ -801,7 +805,7 @@ function paintDesk(){
   function text(s,x,y,col="#c8c5b7"){c.fillStyle=col;c.fillText(s,x,y);}
   const f=feed,bs=desk.series,tf=$("period").value,on=k=>layers.has(k);
   $("marketTitle").textContent=$("pair").value+" · "+"USDT Perpetual"+" · "+tf;
-  if(!f||!bs.length){desk.g=null;const msg=f?.historyError||Date.now()-f?.started>12000?"Futures data unavailable. Check internet or network restrictions, then Reconnect data.":"Connecting to Binance futures…";$("ohlc").textContent=msg;$("chartNote").textContent="Live candles and trade data are loading.";text(msg,12,45);return;}
+  if(!f||!bs.length){desk.g=null;const msg=f?.historyError||Date.now()-f?.started>12000?"Futures data unavailable. Check internet or network restrictions, then Reconnect data.":"Connecting to Binance futures…";$("ohlc").textContent=msg;$("chartNote").textContent=Date.now()-f?.started>12000?"Connection pending. Use Connection report to inspect the failed feeds.":"Live candles and trade data are loading.";text(msg,12,45);return;}
   let end=desk.end===null?bs.length-1:bs.findIndex(b=>b.time>=desk.end);if(end<0)end=bs.length-1;
   const count=desk.count,start=end-count+1,from=Math.max(0,start),visible=bs.slice(from,end+1);
   const l=6,R=W-(W<500?67:82),top=20,axis=H-22,dx=(R-l)/count;
@@ -959,6 +963,22 @@ $("flowTab").onclick=()=>{
 $("interactive").onclick=()=>$("flowTab").click();
 $("period").onchange=()=>{if(feed){feed.ohlc=[];feed.historyError="";resetViewport();connectCandles(feed);updateSeries(feed);fetchHistory(feed);}};
 $("retryFeed").onclick=startFlow;
+$("connectionReport").onclick=()=>{
+  const f=feed, report=$("connectionDetails");
+  report.hidden=false;
+  report.textContent=[
+    "FlowSignal connection report · "+new Date().toISOString(),
+    "Browser online indicator · "+navigator.onLine,
+    "Market · Binance USDT perpetual "+$("pair").value+" / "+$("period").value,
+    "Trade stream · "+(f?.wire||"Not started"),
+    "Candle stream · "+(f?.candleStatus||"Not started"),
+    "Historical candles · "+(f?.historyError||((f?.ohlc?.length||0)>1?"Received":"Pending")),
+    "Captured trades · "+(f?.trades.size||0),
+    "REST · https://fapi.binance.com",
+    "Streams · wss://fstream.binance.com",
+    "Browser fetch/WebSocket errors may hide the cause. Failed connection alone cannot identify ISP, browser, exchange or regional restrictions."
+  ].join("\n");
+};
 $("scanTab").onclick=()=>view(false); $("learnTab").onclick=()=>view(true);
 $("symbol").onchange=()=>run(true);
 $("interval").onchange=selectFrame;
