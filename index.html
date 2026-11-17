@@ -41,12 +41,15 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 .spark{display:flex;gap:1px;align-items:end;height:64px;margin:8px 0}.spark i{background:var(--gold);flex:1}
 .volcell{display:block;background:linear-gradient(to left,var(--shade) var(--width),transparent var(--width));padding:1px 4px}
 #anchor{width:auto;max-width:100%}
+#terminal{padding:12px;background:#11110e}#terminal.wide{position:fixed;inset:0;z-index:10;margin:0;overflow:auto}
+#terminal.wide canvas{height:calc(100dvh - 175px);min-height:300px}.chartTools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px}.chartTools strong{margin-right:auto}.chartTools button,.chartTools summary{font-size:13px;padding:5px 9px;cursor:pointer}.chartTools button[aria-pressed=true]{border-color:var(--gold);color:var(--gold)}#plot{height:clamp(370px,56vh,700px);touch-action:none;cursor:crosshair}
+#ohlc,#scale{font:12px/1.8 ui-monospace,monospace;color:#cdc8b7}#studies{position:relative}#layers{position:absolute;top:100%;right:0;z-index:5;background:#23211a;padding:10px;border:1px solid #665e45;width:min(270px,80vw);max-height:48vh;overflow:auto}#layers label{display:flex;gap:8px;align-items:center;padding:3px}#layers input{width:auto;accent-color:#d4af37}@media(max-width:600px){#terminal{padding:5px}#plot{height:440px}#layers{right:-30px}}
 </style>
 </head>
 <body><main>
 <header><h1>Flow<span>Signal</span></h1><nav aria-label="Views">
 <button id="scanTab" aria-controls="scanner" aria-pressed="true">Scanner</button>
-<button id="flowTab" aria-controls="flow" aria-pressed="false">Order Flow</button>
+<button id="flowTab" aria-controls="flow" aria-pressed="false">Trading Chart</button>
 <button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
 <section id="scanner" aria-label="Scanner">
 <div class="controls">
@@ -57,7 +60,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <div class="grid"><article><h2>Closed-candle signal</h2><div id="verdict">—</div><p id="summary" class="muted"></p>
 <table><thead><tr><th>Level</th><th>Price · USDT</th><th>R:R</th></tr></thead><tbody id="levels"></tbody></table></article>
 <article><h2>Conditions</h2><p class="muted" id="scores"></p><ul id="checks"></ul></article></div>
-<figure><details><summary>Historical candle replay</summary><div class="controls"><button id="replayStart">Start replay</button><button id="replayNext" disabled>Next candle</button><button id="replayExit" disabled>Return to live</button></div><small>Selected chart and signal replay retained closed candles. Timeframe overview stays live.</small></details><div class="heading"><h2 id="chartTitle">Price &amp; volume profile</h2><small>80 candles · 60 bins</small></div>
+<figure><details><summary>Historical candle replay</summary><div class="controls"><button id="replayStart">Start replay</button><button id="replayNext" disabled>Next candle</button><button id="replayExit" disabled>Return to live</button></div><small>Selected chart and signal replay retained closed candles. Timeframe overview stays live.</small></details><div class="heading"><h2 id="chartTitle">Price &amp; volume profile</h2><button id="interactive">Open interactive chart ↗</button></div>
 <canvas id="chart" role="img" aria-label="Candlesticks, closed-candle volume profile and signed candle delta"></canvas>
 <figcaption>Gold = POC · Dashed = VAH / VAL · Shaded column = forming candle · Lower panel = candle delta</figcaption></figure>
 <article class="calculator"><h2>Position size</h2><div class="controls">
@@ -67,8 +70,12 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 </section>
 <section id="flow" hidden aria-label="Order flow">
 <div class="controls"><label>Binance market<select id="venue"><option value="spot">Spot</option><option value="perp">USDⓈ-M perpetual</option></select></label>
-<label>Symbol<select id="pair"></select></label><label>Footprint candle<select id="period"></select></label>
+<label>Symbol<select id="pair"></select></label><label>Interval<select id="period"></select></label>
 <label>Price row<select id="rowSize"><option value="0">Auto</option><option>0.0001</option><option>0.001</option><option>0.01</option><option>0.1</option><option>1</option><option>10</option><option>100</option></select></label></div>
+<figure id="terminal">
+<div class="chartTools"><strong id="marketTitle">Trading chart</strong><div class="switch"><button id="ct">Candles</button><button id="ft" aria-pressed="true">Footprint</button></div><details id="studies"><summary>Indicators</summary><div id="layers"></div></details><button id="expand">Expand</button></div>
+<div class="chartTools"><button id="zin" aria-label="Zoom in">＋</button><button id="zout" aria-label="Zoom out">−</button><button id="latest">Latest</button><button id="fit">Reset view</button><button id="level">Draw level</button><button id="trend">Trendline</button><button id="erase">Clear drawings</button><small id="scale"></small></div>
+<output id="ohlc">Connecting…</output><canvas id="plot" tabindex="0" role="img" aria-label="Interactive price chart with footprint candles, liquidity heatmap and indicators"></canvas><figcaption id="chartNote"></figcaption><small>Wheel or pinch to zoom · drag to pan · drag price axis to scale · hover to inspect a row</small></figure>
 <p id="coverage" class="muted" role="status"></p>
 <article><div class="heading"><h2>Footprint</h2><label>Candle<select id="barPick"></select></label></div><p id="barStats"></p><div id="ladder" class="scroll"></div>
 <small>Bid = aggressive sells · Ask = aggressive buys · Diagonal imbalance ≥ 3× against a nonzero adjacent row. Contiguous runs of 3+ flag potential support or resistance.</small><p id="zones"></p></article>
@@ -427,6 +434,7 @@ function startFlow(){
   const s=$("pair").value,perp=$("venue").value==="perp",prefix=perp?"/fapi/v1/":"/api/v3/";
   const f=feed={s,perp,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
     wire:"Connecting",force:"Connecting",bookTime:0,quotes:{},symbol:s};
+  f.ohlc=[];desk.series=[];desk.profileTrades=[];desk.marks=[];tool("");resetViewport();repeat(f,()=>fetchHistory(f),30000);
   const api=(name,extra="")=>jsonFrom(perp?FUT:SPOT,prefix+name+"?symbol="+s+extra,f);
   const futures=(path,extra="")=>jsonFrom(FUT,path+"?symbol="+s+extra,f);
   $("barPick").replaceChildren();$("alertMsg").textContent="";$("anchor").value="";
@@ -434,7 +442,8 @@ function startFlow(){
   connect(f,(perp?route:"wss://data-stream.binance.vision/ws/")+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
   connect(f,route+stream+"@markPrice@1s","markWire",d=>{
     if(+d.p>0 && Number.isFinite(+d.r)){
-      f.markTick={markPrice:d.p,lastFundingRate:d.r,time:+d.E};
+      f.markTick={markPrice:d.p,lastFundingRate:d.r,time:+d.E};f.rateSamples??=[];
+      if(!f.rateSamples.length || +d.E-f.rateSamples.at(-1).fundingTime>=10000){f.rateSamples.push({fundingTime:+d.E,fundingRate:+d.r});if(f.rateSamples.length>360)f.rateSamples.shift();}
       checkAlert(f,"funding",100*Number(d.r),+d.E);
     }
   });
@@ -497,6 +506,14 @@ function startFlow(){
       try{const p=val(await jsonFrom(hosts,path,f));f.quotes[key]=p>0?p:null;}catch{f.quotes[key]=null;}
     }));f.quoteTime=Date.now();
   },30000);
+  (async()=>{try{
+    let page=await api("aggTrades","&limit=1000");mergeTrades(f,page);
+    for(let n=0;n<5&&page.length&&feed===f;n++){
+      const first=page[0].a;if(first<1000)break;
+      page=await api("aggTrades","&limit=1000&fromId="+(first-1000));
+      if(!page.length||page[0].a>=first)break;mergeTrades(f,page);
+    }
+  }catch{}})();
   paintFlow();f.paint=setInterval(paintFlow,2000);
 }
 function bucket(t,frame) {
@@ -621,6 +638,7 @@ function paintTrades(f,trades) {
 }
 function paintFlow(){
   const f=feed;if(!f)return;
+  updateSeries(f);
   const trades=[...f.trades.values()].sort((a,b)=>a.id-b.id);
   if(trades.length){
     const gaps=trades.reduce((n,t,i)=>n+(i&&t.id>trades[i-1].id+1?1:0),0);
@@ -667,7 +685,218 @@ $("arm").onclick=()=>{
   feed.alert={metric,price:p,above:$("alertSide").value==="Above",since:Date.now()};$("alertMsg").textContent="Armed · "+$("alertSide").value+" "+fmt(p);
 };
 
+
+// Build one chronological series for every overlay. Footprint rows only use observed trades.
+const desk={foot:true,count:7,end:null,sy:1,hover:null,marks:[],tool:"",first:null,pointers:new Map(),series:[],serial:0};
+const layers=new Set(),surface=$("plot"),bound=(x,a,b)=>Math.min(b,Math.max(a,x));
+const choices=[["heat","Resting liquidity heatmap",1],["imb","Diagonal imbalance",1],["stack","Stacked imbalance zones"],["abs","Possible absorption"],["profile","Volume profile / POC / VA",1],["tpo","TPO profile"],["vwap","VWAP"],["bands","VWAP bands"],["side","Buy and sell VWAP"],["large","Large trade markers"],["liq","Reported liquidations (perp)"],["model","Hypothetical leverage levels (perp)"],["fvg","Fair value gaps"],["sweep","Liquidity sweeps"],["ob","Order block candidates"],["volume","Volume"],["delta","Delta",1],["cvd","CVD"],["oi","Open interest"],["fund","Funding rate"]];
+for(const [key,name,checked] of choices){
+  const l=document.createElement("label"),box=document.createElement("input");box.type="checkbox";box.checked=!!checked;
+  if(checked)layers.add(key);box.onchange=()=>{if(box.checked)layers.add(key);else layers.delete(key);paintDesk();};
+  l.append(box,name);$("layers").append(l);
+}
+function endOf(t,tf){
+  const day=new Date(t);
+  if(tf==="1M")return Date.UTC(day.getUTCFullYear(),day.getUTCMonth()+1,1);
+  return t+parseInt(tf)*({s:1000,m:60000,h:3600000,d:86400000,w:604800000})[tf.slice(-1)];
+}
+async function fetchHistory(f){
+  const tf=$("period").value,id=++desk.serial;
+  if(f.perp&&tf==="1s")return;
+  try{
+    const rows=await jsonFrom(f.perp?FUT:SPOT,(f.perp?"/fapi/v1":"/api/v3")+"/klines?"+new URLSearchParams({symbol:f.s,interval:tf,limit:300}),f);
+    if(feed!==f||id!==desk.serial)return;
+    f.ohlc=rows.map(candle);updateSeries(f);
+  }catch{/* On a restricted endpoint the observed trades supply the price series. */}
+}
+function resetViewport(){
+  desk.end=null;desk.hover=null;desk.sy=1;desk.count=desk.foot?(surface.clientWidth<560?4:8):60;
+}
+function updateSeries(f){
+  const tf=$("period").value,all=[...f.trades.values()].sort((a,b)=>a.t-b.t||a.id-b.id);
+  const m=new Map((f.ohlc||[]).map(b=>[b.time,{...b,prints:[],history:true}]));
+  for(const t of all){
+    const key=bucket(t.t,tf);
+    if(!m.has(key))m.set(key,{time:key,open:t.p,high:t.p,low:t.p,close:t.p,delta:0,volume:0,prints:[]});
+    const b=m.get(key);b.prints.push(t);
+    if(!b.history){b.high=Math.max(b.high,t.p);b.low=Math.min(b.low,t.p);b.close=t.p;b.volume+=t.q;b.delta+=t.buy?t.q:-t.q;}
+    else if(key===bucket(Date.now(),tf)){b.high=Math.max(b.high,t.p);b.low=Math.min(b.low,t.p);b.close=t.p;}
+  }
+  desk.series=[...m.values()].sort((a,b)=>a.time-b.time).slice(-600);
+  let cvd=0,pv=0,v=0,p2=0,bq=0,sq=0,bpv=0,spv=0;
+  const range=$("range").value,now=Date.now();
+  const since=range==="session"?Math.floor(now/86400000)*86400000:range==="anchor"?Date.parse($("anchor").value):range==="fixed"?now-60000*Math.max(1,$("minutes").valueAsNumber):0;
+  desk.profileTrades=all.filter(t=>t.t>=since);
+  for(const b of desk.series){
+    cvd+=b.delta;b.cvd=cvd;
+    for(const t of b.prints){if(!(t.t>=since))continue;
+      v+=t.q;pv+=t.p*t.q;p2+=t.p*t.p*t.q;
+      if(t.buy){bq+=t.q;bpv+=t.q*t.p;}else{sq+=t.q;spv+=t.q*t.p;}
+    }
+    if(v&&b.prints.length){b.avg=pv/v;b.sd=Math.sqrt(Math.max(0,p2/v-b.avg*b.avg));b.bv=bpv/bq;b.sv=spv/sq;}
+  }
+  paintDesk();
+}
+function structure(bars){
+  const zones=[],sweeps=[];let high=null,low=null;
+  for(let i=4;i<bars.length;i++){
+    const b=bars[i],j=i-2,p=bars[j],around=[bars[i-4],bars[i-3],bars[i-1],b];
+    if(around.every(k=>p.high>k.high))high=j;
+    if(around.every(k=>p.low<k.low))low=j;
+    if(b.low>p.high)zones.push({type:"fvg",i,up:true,lo:p.high,hi:b.low});
+    if(b.high<p.low)zones.push({type:"fvg",i,up:false,lo:b.high,hi:p.low});
+    for(const up of [true,false]){
+      const pivot=up?high:low;if(pivot===null)continue;
+      const level=up?bars[pivot].high:bars[pivot].low;
+      if(up?b.high>level&&b.close<level:b.low<level&&b.close>level)sweeps.push({i,p:up?b.high:b.low,label:up?"BSL sweep":"SSL sweep"});
+      if(up?b.close>level:b.close<level){
+        for(let n=i-1;n>=pivot;n--){const k=bars[n];if(up?k.close<k.open:k.close>k.open){zones.push({type:"ob",i,up,lo:k.low,hi:k.high});break;}}
+        if(up)high=null;else low=null;
+      }
+    }
+  }
+  for(const z of zones){let n=z.i+1;while(n<bars.length&&(z.up?bars[n].low>z.lo:bars[n].high<z.hi))n++;z.end=n;}
+  return {zones,sweeps};
+}
+function paintDesk(){
+  const W=surface.clientWidth,H=surface.clientHeight;if(!W||!H)return;
+  const c=surface.getContext("2d"),r=devicePixelRatio||1;
+  if(surface.width!==Math.round(W*r)||surface.height!==Math.round(H*r)){surface.width=Math.round(W*r);surface.height=Math.round(H*r);}
+  c.setTransform(r,0,0,r,0,0);c.fillStyle="#100f0d";c.fillRect(0,0,W,H);c.font="11px ui-monospace,monospace";
+  function line(x,y,X,Y,col,dash=[]){c.strokeStyle=col;c.setLineDash(dash);c.beginPath();c.moveTo(x,y);c.lineTo(X,Y);c.stroke();c.setLineDash([]);}
+  function rect(x,y,w,h,col){c.fillStyle=col;c.fillRect(x,y,w,h);}
+  function text(s,x,y,col="#c8c5b7"){c.fillStyle=col;c.fillText(s,x,y);}
+  const f=feed,bs=desk.series,tf=$("period").value,on=k=>layers.has(k);
+  $("marketTitle").textContent=$("pair").value+" · "+($("venue").value==="spot"?"Spot":"Perpetual")+" · "+tf;
+  if(!f||!bs.length){desk.g=null;$("ohlc").textContent="Waiting for exchange data…";$("chartNote").textContent="";return;}
+  let end=desk.end===null?bs.length-1:bs.findIndex(b=>b.time>=desk.end);if(end<0)end=bs.length-1;
+  const count=desk.count,start=end-count+1,from=Math.max(0,start),visible=bs.slice(from,end+1);
+  const l=6,R=W-(W<500?67:82),top=20,axis=H-22,dx=(R-l)/count;
+  const panels=["volume","delta","cvd","oi","fund"].filter(on),ph=Math.min(52,H*.4/Math.max(1,panels.length)),bottom=axis-panels.length*ph-4;
+  const low=Math.min(...visible.map(b=>b.low)),high=Math.max(...visible.map(b=>b.high)),mid=(high+low)/2;
+  const span=((high-low)*1.24||mid*.0005||1)/desk.sy,lo=mid-span/2,hi=mid+span/2;
+  const x=i=>l+(i-start+.5)*dx,y=p=>top+(hi-p)/span*(bottom-top);
+  const indices=new Map(bs.map((b,i)=>[b.time,i]));
+  function tx(t){const k=bucket(t,tf),i=indices.get(k);return i===undefined?NaN:x(i)-dx/2+dx*(t-k)/(endOf(k,tf)-k);}
+  desk.g={l,R,top,bottom,lo,hi,start,end,dx,count};
+  for(let i=0;i<7;i++){const p=hi-span*i/6;line(l,y(p),R,y(p),"#2b2a23");text(fmt(p),R+4,y(p)+4);}
+  visible.forEach((b,j)=>{const i=from+j;if(i%Math.max(1,Math.ceil(85/dx)))return;
+    line(x(i),top,x(i),axis,"#24231f");text(/[dwM]$/.test(tf)?new Date(b.time).toLocaleDateString():clock(b.time),bound(x(i)-25,1,R-65),H-5);});
+  c.save();c.beginPath();c.rect(l,top,R-l,bottom-top);c.clip();
+  if(on("heat")){
+    const max=Math.max(1e-9,...f.books.flatMap(b=>[...b.b,...b.a].map(row=>row[1])));
+    f.books.forEach((b,i)=>{const xx=tx(b.t);if(!Number.isFinite(xx))return;
+      const until=Math.min(b.t+8000,f.books[i+1]?.t??Date.now()),k=bucket(b.t,tf),width=Math.max(1,dx*(until-b.t)/(endOf(k,tf)-k));
+      for(const [arr,col] of [[b.b,"60,211,169"],[b.a,"255,135,82"]])for(const [p,q] of arr)rect(xx,y(p)-1,width,2.6,"rgba("+col+","+(0.12+.8*Math.sqrt(q/max))+")");
+    });
+  }
+  if(on("fvg")||on("ob")||on("sweep")){
+    const {zones,sweeps}=structure(bs.slice(0,end+1));
+    for(const z of zones){if(!on(z.type)||z.end<start)continue;const a=Math.max(l,x(z.i)),b=Math.min(R,x(z.end));
+      rect(a,y(z.hi),b-a,Math.max(1,y(z.lo)-y(z.hi)),z.up?"#38be8b29":"#e87a7529");if(b-a>35)text(z.type.toUpperCase(),a+2,y(z.hi)+10,z.up?colors.up:colors.down);}
+    if(on("sweep"))for(const e of sweeps)if(e.i>=start)text(e.label,x(e.i)-15,y(e.p)-3,colors.gold);
+  }
+  const ideal=span*17/(bottom-top),u=10**Math.floor(Math.log10(ideal));
+  const step=+$("rowSize").value||u*[1,2,5,10].find(n=>n*u>=ideal),rh=step/span*(bottom-top);
+  if(on("profile")||on("tpo")){
+    const a=aggregate(desk.profileTrades.filter(t=>t.t<endOf(bs[end].time,tf)),step),rows=[...a.levels.values()].sort((a,b)=>a.i-b.i);
+    const va=valueArea(rows),mv=Math.max(1e-9,...rows.map(r=>r.b+r.s)),mt=Math.max(1,...rows.map(r=>r.brackets.size));
+    for(const r of rows){const yy=y((r.i+1)*step),w=58*(r.b+r.s)/mv;
+      if(on("profile"))rect(R-w,yy,w,Math.max(1,rh-1),"#cda53455");if(on("tpo"))rect(l,yy,30*r.brackets.size/mt,Math.max(1,rh-1),"#9570ba66");}
+    if(va&&on("profile"))for(const [name,p] of [["POC",(va.peak+.5)*step],["VAH",(va.hi+1)*step],["VAL",va.lo*step]]){
+      line(l,y(p),R,y(p),name==="POC"?colors.gold:"#928b74",name==="POC"?[]:[4,4]);text(name,l+2,y(p)-2,colors.gold);}
+  }
+  function curve(get,col,dash=[]){let prev=null;visible.forEach((b,j)=>{const v=get(b);if(!Number.isFinite(v)){prev=null;return;}
+    const pos=[x(from+j),y(v)];if(prev)line(...prev,...pos,col,dash);prev=pos;});}
+  const finger=desk.hover,hoverIndex=finger?bound(start+Math.floor((finger.x-l)/dx),0,bs.length-1):end;
+  let rowText="";
+  visible.forEach((b,j)=>{
+    const i=from+j,xx=x(i),ink=b.close>=b.open?colors.up:colors.down;
+    if(!desk.foot){line(xx,y(b.high),xx,y(b.low),ink);const w=Math.max(1,Math.min(36,dx*.66));rect(xx-w/2,y(Math.max(b.close,b.open)),w,Math.max(1,Math.abs(y(b.close)-y(b.open))),ink);}
+    if(!b.prints.length)return;
+    const a=aggregate(b.prints,step),rows=[...a.levels.values()].sort((a,b)=>a.i-b.i),peak=Math.max(...rows.map(r=>Math.max(r.b,r.s)));
+    let prev=-Infinity,buys=0,sells=0;
+    for(const r of rows){
+      const yy=y((r.i+1)*step),lower=a.levels.get(r.i-1),upper=a.levels.get(r.i+1);
+      const up=lower?.s>0&&r.b>=3*lower.s,down=upper?.b>0&&r.s>=3*upper.b;
+      if(prev+1!==r.i)buys=sells=0;prev=r.i;buys=up?buys+1:0;sells=down?sells+1:0;
+      if(on("stack")&&(buys>=3||sells>=3))rect(xx,yy,R-xx,3*rh,up?"#37af8038":"#c4605938");
+      if(desk.foot){const half=dx*.43;
+        rect(xx-half,yy,half,Math.max(1,rh-1),"rgba(178,67,66,"+(.18+.57*r.s/peak)+")");
+        rect(xx,yy,half,Math.max(1,rh-1),"rgba(47,151,103,"+(.18+.57*r.b/peak)+")");
+        if(dx>55&&rh>=12){const compact=v=>v>=1000?(v/1000).toFixed(1)+"k":Number(v.toPrecision(2)).toString();
+          c.textAlign="right";text(compact(r.s),xx-3,yy+rh/2+4,down&&on("imb")?"#ffac98":"#f7e1da");c.textAlign="left";text(compact(r.b),xx+3,yy+rh/2+4,up&&on("imb")?"#aaffe2":"#d8f6dd");}}
+      if(on("imb")&&(up||down))rect(xx+(up?.42:-.45)*dx,yy,2,Math.max(1,rh-1),up?colors.up:colors.down);
+      if(finger&&hoverIndex===i&&finger.y>=yy&&finger.y<yy+rh)rowText=" · "+fmt(r.i*step)+" Sell "+fmt(r.s)+" × Buy "+fmt(r.b);
+    }
+    const d=a.buy-a.sell;if(on("abs")&&b.high>b.low&&Math.abs(d)>.35*(a.buy+a.sell)&&((d<0&&b.close>(b.high+b.low)/2)||(d>0&&b.close<(b.high+b.low)/2)))text("Abs?",xx-10,y(b.high)-3,colors.gold);
+    if(on("large"))for(const t of b.prints)if(t.q*t.p>=$("minPrint").valueAsNumber){c.beginPath();c.arc(tx(t.t),y(t.p),3,0,Math.PI*2);c.strokeStyle=t.buy?colors.up:colors.down;c.stroke();}
+  });
+  if(on("vwap"))curve(b=>b.avg,colors.gold);if(on("bands"))for(const n of [-1,1])curve(b=>b.avg+n*b.sd,"#c8aa68",[3,3]);
+  if(on("side")){curve(b=>b.bv,colors.up);curve(b=>b.sv,colors.down);}
+  if(on("liq")&&f.perp)for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
+  if(on("model")&&f.perp)for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
+  for(const mark of desk.marks){if(mark.length===1){const yy=y(mark[0].p);line(l,yy,R,yy,"#78bbef",[4,3]);text(fmt(mark[0].p),l+32,yy-3,"#78bbef");}
+    else{const [a,b]=mark;if(Number.isFinite(tx(a.t))&&Number.isFinite(tx(b.t)))line(tx(a.t),y(a.p),tx(b.t),y(b.p),"#78bbef");}}
+  if(desk.first)rect(tx(desk.first.t)-2,y(desk.first.p)-2,4,4,"#78bbef");
+  c.restore();
+  panels.forEach((key,n)=>{
+    const y0=bottom+4+n*ph,h=ph-5;let pts,source="";
+    if(key==="oi"||key==="fund"){
+      const hist=key==="oi"?(f.oiHist?.length?f.oiHist:f.otherOI?.length?f.otherOI:f.okOI||[]):(f.rateSamples?.length?f.rateSamples:f.fund?.length?f.fund:f.otherFund||[]);
+      source=key==="oi"?(f.oiHist?.length?"Binance":f.otherOI?.length?"Bybit":f.okOI?.length?"OKX":""):(f.rateSamples?.length||f.fund?.length?"Binance":"Bybit");
+      pts=hist.map(r=>[tx(+(r.timestamp??r.fundingTime)),key==="oi"?+r.sumOpenInterest:100*Number(r.fundingRate)]);
+    }else pts=visible.map((b,j)=>[x(from+j),b[key]]);
+    pts=pts.filter(([xx,v])=>Number.isFinite(xx)&&Number.isFinite(v)&&xx>=l&&xx<=R);
+    const hist=key==="volume"||key==="delta",vals=pts.map(p=>p[1]),min=Math.min(...vals,hist?0:Infinity),max=Math.max(...vals,hist?0:-Infinity);
+    const py=v=>y0+h-3-(max===min?.5:(v-min)/(max-min))*(h-9);
+    line(l,y0,R,y0,"#48453c");pts.forEach(([xx,v],i)=>{if(hist)rect(xx-dx*.29,Math.min(py(0),py(v)),Math.max(1,dx*.58),Math.max(1,Math.abs(py(0)-py(v))),v<0?colors.down:colors.up);
+      else{if(i)line(pts[i-1][0],py(pts[i-1][1]),xx,py(v),"#afa1ea");rect(xx-1,py(v)-1,2,2,"#afa1ea");}});
+    text(key.toUpperCase()+" "+source+(pts.length?"":" · no visible samples"),l+2,y0+11);if(pts.length)text(fmt(pts.at(-1)[1]),R+4,y0+12);
+  });
+  if(finger&&finger.x<R&&finger.y>=top&&finger.y<=axis){line(finger.x,top,finger.x,axis,"#ada48f",[2,3]);line(l,finger.y,R,finger.y,"#ada48f",[2,3]);}
+  const b=bs[hoverIndex];$("ohlc").textContent=when(b.time)+" · O "+fmt(b.open)+" H "+fmt(b.high)+" L "+fmt(b.low)+" C "+fmt(b.close)+rowText;
+  $("scale").textContent=count+" bars · "+(desk.end===null?"Live edge":"Panned");
+  $("chartNote").textContent=(desk.foot?"Sell × buy rows · "+fmt(step)+" USDT per row. Blank candles have no captured trades. ":"")+(on("heat")?"Heatmap: green bids / orange asks, sampled since opening. ":"")+(on("model")?"Violet dashed = assumed leverage levels. ":"");
+}
+
+function queuePlot(){if(!desk.raf)desk.raf=requestAnimationFrame(()=>{desk.raf=0;paintDesk();});}
+function pan(i){const a=desk.series;if(!a.length)return;i=bound(Math.round(i),0,a.length-1);desk.end=i===a.length-1?null:a[i].time;paintDesk();}
+function zoom(factor,px){const g=desk.g;if(!g)return;desk.count=bound(Math.round(g.count*factor),2,300);pan(g.end+(desk.count-g.count)*(1-bound(((px??g.R)-g.l)/(g.R-g.l),0,1)));}
+function mode(foot){desk.foot=foot;resetViewport();$("ft").setAttribute("aria-pressed",foot);$("ct").setAttribute("aria-pressed",!foot);paintDesk();}
+$("ft").onclick=()=>mode(true);$("ct").onclick=()=>mode(false);$("zin").onclick=()=>zoom(.72);$("zout").onclick=()=>zoom(1.45);
+$("latest").onclick=()=>{desk.end=null;paintDesk();};$("fit").onclick=()=>{resetViewport();paintDesk();};
+$("expand").onclick=()=>{$("expand").textContent=$("terminal").classList.toggle("wide")?"Collapse":"Expand";queuePlot();};
+function tool(k){desk.tool=k;desk.first=null;for(const a of ["level","trend"])$(a).setAttribute("aria-pressed",a===k);queuePlot();}
+for(const k of ["level","trend"])$(k).onclick=()=>tool(desk.tool===k?"":k);
+$("erase").onclick=()=>{desk.marks=[];tool("");};
+function point(e){const r=surface.getBoundingClientRect();return {x:e.clientX-r.left,y:e.clientY-r.top};}
+function distance(){const [a,b]=desk.pointers.values();return Math.hypot(a.x-b.x,a.y-b.y);}
+surface.addEventListener("wheel",e=>{e.preventDefault();zoom(e.deltaY<0?.8:1.25,point(e).x);},{passive:false});
+surface.onpointerdown=e=>{
+ const p=point(e),g=desk.g;if(!g)return;surface.setPointerCapture(e.pointerId);
+ if(p.x>g.R){desk.axis={id:e.pointerId,y:p.y,sy:desk.sy};return;}
+ if(desk.tool){
+ const k=(p.x-g.l)/g.dx,b=desk.series[g.start+Math.floor(k)];if(!b||p.y<g.top||p.y>g.bottom)return;
+ const dot={t:b.time+(k-Math.floor(k))*(endOf(b.time,$("period").value)-b.time),p:g.hi-(p.y-g.top)/(g.bottom-g.top)*(g.hi-g.lo)};
+ if(desk.tool==="level"){desk.marks.push([dot]);tool("");}else if(desk.first){desk.marks.push([desk.first,dot]);tool("");}else{desk.first=dot;queuePlot();}return;}
+ desk.pointers.set(e.pointerId,p);desk.drag={x:p.x,end:g.end,dx:g.dx};if(desk.pointers.size===2)desk.pinch=distance();
+};
+surface.onpointermove=e=>{const p=point(e);desk.hover=p;
+ if(desk.axis?.id===e.pointerId){desk.sy=bound(desk.axis.sy*Math.exp((desk.axis.y-p.y)/120),.1,15);queuePlot();return;}
+ if(desk.pointers.has(e.pointerId)){desk.pointers.set(e.pointerId,p);
+ if(desk.pointers.size===2){const dist=distance();if(dist>3&&Math.abs(dist-desk.pinch)>5){zoom(desk.pinch/dist,[...desk.pointers.values()].reduce((v,p)=>v+p.x,0)/2);desk.pinch=dist;}}
+ else if(desk.drag)pan(desk.drag.end+(desk.drag.x-p.x)/desk.drag.dx);}queuePlot();};
+surface.onpointerup=surface.onpointercancel=e=>{desk.pointers.delete(e.pointerId);desk.axis=null;desk.drag=null;if(e.pointerType==="touch")desk.hover=null;queuePlot();};
+surface.onpointerleave=()=>{if(!desk.pointers.size){desk.hover=null;queuePlot();}};
+surface.ondblclick=()=>$("fit").click();
+surface.onkeydown=e=>{if(!desk.g)return;if(["ArrowLeft","ArrowRight","End","+","=","-"].includes(e.key))e.preventDefault();
+ if(e.key==="ArrowLeft")pan(desk.g.end-1);if(e.key==="ArrowRight")pan(desk.g.end+1);if(e.key==="End")$("latest").click();
+ if(e.key==="+"||e.key==="=")zoom(.72);if(e.key==="-")zoom(1.45);};
+document.addEventListener("keydown",e=>{if(e.key==="Escape"){tool("");if($("terminal").classList.contains("wide"))$("expand").click();}});
+new ResizeObserver(queuePlot).observe(surface);
 function view(learn) {
+  desk.fromScanner=!learn;
   if(feed)stopFlow();
   $("flow").hidden=true;
   $("flowTab").setAttribute("aria-pressed","false");
@@ -680,8 +909,10 @@ $("flowTab").onclick=()=>{
   if (!$("flow").hidden)return;
   $("scanner").hidden=$("learn").hidden=true;$("flow").hidden=false;
   for(const id of ["scanTab","learnTab","flowTab"])$(id).setAttribute("aria-pressed",String(id==="flowTab"));
-  $("pair").value=$("symbol").value;$("period").value=$("interval").value;startFlow();
+  if(desk.fromScanner){$("pair").value=$("symbol").value;$("period").value=$("interval").value;desk.fromScanner=false;}startFlow();
 };
+$("interactive").onclick=()=>$("flowTab").click();
+$("period").onchange=()=>{if(feed){feed.ohlc=[];resetViewport();updateSeries(feed);fetchHistory(feed);}};
 $("scanTab").onclick=()=>view(false); $("learnTab").onclick=()=>view(true);
 $("symbol").onchange=()=>run(true);
 $("interval").onchange=selectFrame;
@@ -689,6 +920,6 @@ $("refresh").onclick=()=>run();
 $("capital").oninput=$("risk").oninput=calculate;
 new ResizeObserver(draw).observe($("chart"));
 window.addEventListener("resize",draw);
-render(); run(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
+render(); run();$("period").value="1m";$("flowTab").click(); setInterval(()=>{if(!$("scanner").hidden)run();},15000);
 </script></body></html>
 
