@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlowSignal</title>
+<style>
+:root{color-scheme:dark;--bg:#0c0b09;--card:#171612;--line:#39372e;--ink:#f3efe4;--dim:#b8b3a4;--gold:#d4af37;--up:#65d5a0;--down:#ff817a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1200px;margin:auto;padding:20px clamp(12px,3vw,36px)}
+header,nav,.controls,.heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+header,.heading{justify-content:space-between}
+header{padding-bottom:16px;border-bottom:1px solid var(--line)}
+h1,h2,h3,p{margin:0}h1{letter-spacing:-.07em;font-size:30px}h1 span{color:var(--gold)}
+h2{font-size:18px}h3{font-size:15px;color:var(--gold)}
+button,select,input{font:inherit;color:var(--ink);background:#211f19;border:1px solid var(--line);border-radius:6px;padding:8px 12px}
+button,select{cursor:pointer}button:hover{border-color:var(--gold)}:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+nav button[aria-pressed=true]{background:var(--gold);color:#171309;border-color:var(--gold)}
+label,small,footer,.muted,figcaption{color:var(--dim)}label{display:grid;gap:4px;font-size:13px}
+.controls{align-items:end;margin:18px 0}.status{margin-left:auto;font:13px/1.5 ui-monospace,monospace}
+.grid,.lessons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+article,figure{margin:0;padding:16px;background:var(--card);border:1px solid var(--line);border-radius:10px;min-width:0}
+figure,.calculator,.lessons{margin-top:12px}
+#verdict{font:700 clamp(30px,5vw,54px)/1.2 system-ui;letter-spacing:-.05em;color:var(--dim)}
+table{border-collapse:collapse;width:100%;margin-top:12px;font-variant-numeric:tabular-nums}
+td,th{border-top:1px solid var(--line);padding:5px;text-align:right}th:first-child,td:first-child{text-align:left}
+ul{list-style:none;padding:0;margin:12px 0}li{padding:5px 0}.yes{color:var(--up)}.no{color:var(--down)}
+canvas{width:100%;height:clamp(320px,45vw,470px);display:block}figcaption,footer{font-size:13px}
+input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0} [hidden]{display:none!important}
+@media(max-width:650px){.grid,.lessons{grid-template-columns:1fr}.status{width:100%;margin:0}article,figure{padding:12px}}
+</style>
+</head>
+<body><main>
+<header><h1>Flow<span>Signal</span></h1><nav aria-label="Views">
+<button id="scanTab" aria-controls="scanner" aria-pressed="true">Scanner</button>
+<button id="learnTab" aria-controls="learn" aria-pressed="false">Seekho</button></nav></header>
+<section id="scanner" aria-label="Scanner">
+<div class="controls">
+<label>Market<select id="symbol"><option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option><option>BNBUSDT</option><option>XRPUSDT</option></select></label>
+<label>Timeframe<select id="interval"><option>1m</option><option selected>5m</option><option>15m</option><option>1h</option></select></label>
+<button id="refresh">↻ Refresh</button><span class="status" id="status" role="status">Loading…</span></div>
+<div class="grid"><article><h2>Closed-candle signal</h2><div id="verdict">—</div><p id="summary" class="muted"></p>
+<table><thead><tr><th>Level</th><th>Price · USDT</th><th>R:R</th></tr></thead><tbody id="levels"></tbody></table></article>
+<article><h2>Conditions</h2><p class="muted" id="scores"></p><ul id="checks"></ul></article></div>
+<figure><div class="heading"><h2 id="chartTitle">Price &amp; volume profile</h2><small>80 candles · 60 bins</small></div>
+<canvas id="chart" role="img" aria-label="Candlesticks, closed-candle volume profile and signed candle delta"></canvas>
+<figcaption>Gold = POC · Dashed = VAH / VAL · Shaded column = forming candle · Lower panel = candle delta</figcaption></figure>
+<article class="calculator"><h2>Position size</h2><div class="controls">
+<label>Capital ($)<input id="capital" type="number" min="0" step="any" value="1000"></label>
+<label>Risk (%)<input id="risk" type="number" min="0" max="100" step="any" value="1"></label></div>
+<output id="size"></output><p><small>Uses stop distance and assumes 1 USDT ≈ $1. Excludes fees and slippage.</small></p></article>
+</section>
+<section id="learn" aria-label="Seekho" hidden><div class="lessons" lang="hi-Latn">
+<article><h3>Delta</h3><p>Taker buy volume se taker sell volume ghatao. +20 BTC ka matlab buyers ne sellers se 20 BTC zyada aggressively trade kiya.</p></article>
+<article><h3>CVD</h3><p>Har candle ka signed delta jodne se cumulative volume delta milta hai. Scanner sirf aakhri 3 closed candles ka sum dekhta hai.</p></article>
+<article><h3>Imbalance</h3><p>Kisi price level par aggressive buying ya selling bhaari ho sakti hai. Poori candle ka delta us level ki pehchaan nahi batata.</p></article>
+<article><h3>POC / VAH / VAL</h3><p>Har candle ka volume uski range ke bins mein barabar baantte hain. Sabse zyada estimated volume wala bin POC hai. Wahan se 70% volume cover karne wali area ki upper aur lower boundaries VAH aur VAL hain.</p></article>
+<article><h3>Absorption</h3><p>Heavy buying ke bawajood price aage na badhe toh passive sellers buys absorb kar rahe ho sakte hain. Yeh observation hai, scanner ka signal rule nahi.</p></article>
+<article><h3>Signal kaise banta hai?</h3><p>Band candle par VAL/VAH test, delta, 3-candle CVD, volume aur close ki position check hoti hai. Leading side ke 4–5 points = BUY/SELL, 3 = WATCH, baaki WAIT. Barabari par WAIT.</p></article>
+<article><h3>Risk rules</h3><p>Ek trade mein maximum 1% risk. Minimum R:R 1:1.5 dekho. Din mein maximum 3 trades lo. Teen losses ke baad us din trading band karo.</p></article>
+<article><h3>Footprint ki limit</h3><p>Yahan delta candle-level hai. Asli per-price footprint ke liye aggTrades ya trade WebSocket data ko price aur taker side ke hisaab se group karna padta hai.</p></article>
+</div></section>
+<footer>Educational tool. Not financial advice. Signals are not guaranteed. Paper trade first. Delta is candle-level taker buy minus taker sell volume, not a true footprint.</footer>
+</main><script>
+"use strict";
+const $ = id => document.getElementById(id);
+const sum = values => values.reduce((a,b) => a+b,0);
+const price = n => n.toLocaleString("en-US",{maximumSignificantDigits:9});
+const colors = {up:"#65d5a0",down:"#ff817a",gold:"#d4af37",dim:"#b8b3a4"};
+let snapshot = null, generation = 0, busy = false;
+
+function candle(row) {
+  const fields = [0,1,2,3,4,5,6,9].map(i =>
+    row[i] == null || row[i] === "" ? NaN : Number(row[i]));
+  const [time,open,high,low,close,volume,end,buy] = fields;
+  if (!fields.every(Number.isFinite) || low<=0 || low>Math.min(open,close) ||
+      high<Math.max(open,close) || volume<0 || buy<0 || buy>volume || end<time)
+    throw Error("Invalid candle");
+  return {time,open,high,low,close,volume,end,delta:2*buy-volume};
+}
+
+async function load(symbol,interval) {
+  const path = "/api/v3/klines?"+new URLSearchParams({symbol,interval,limit:300});
+  for (const host of ["https://data-api.binance.vision","https://api.binance.com"]) {
+    const controller = new AbortController();
+    const timer = setTimeout(()=>controller.abort(),6500);
+    try {
+      const response = await fetch(host+path,{signal:controller.signal,cache:"no-store"});
+      if (!response.ok) throw Error("HTTP "+response.status);
+      const rows = (await response.json()).map(candle);
+      if (rows.length<22 || rows.some((c,i)=>i>0 && c.time<=rows[i-1].end))
+        throw Error("Incomplete history");
+      return rows;
+    } catch (error) {
+      console.warn(host,error.message);
+    } finally { clearTimeout(timer); }
+  }
+  throw Error("Data unavailable. Check internet/VPN or open via a web server.");
+}
+
+function profile(rows) {
+  if (!rows.length) return null;
+  const low = Math.min(...rows.map(c=>c.low)), high = Math.max(...rows.map(c=>c.high));
+  const step = (high-low)/60, bins = Array(60).fill(0);
+  const bin = p => step ? Math.max(0,Math.min(59,Math.floor((p-low)/step))) : 0;
+  for (const c of rows) {
+    const first = bin(c.low), last = bin(c.high);
+    const share = c.volume/(last-first+1);
+    for (let i=first;i<=last;i++) bins[i]+=share;
+  }
+  const total = sum(bins);
+  if (!total) return null;
+  const peak = bins.indexOf(Math.max(...bins));
+  let left=peak, right=peak, covered=bins[peak];
+  // Equal neighbours expand downward first. POC uses the bin midpoint.
+  while (covered<0.7*total && (left>0 || right<59)) {
+    if (right<59 && (left===0 || bins[right+1]>bins[left-1])) covered+=bins[++right];
+    else covered+=bins[--left];
+  }
+  return {bins,low,high,step,poc:low+(peak+0.5)*step,val:low+left*step,vah:low+(right+1)*step};
+}
+
+function analyse(rows,p) {
+  if (!p || rows.length<21) return null;
+  const c=rows.at(-1), previous=rows.slice(-21,-1);
+  const avgV=sum(previous.map(k=>k.volume))/20;
+  const avgD=sum(previous.map(k=>Math.abs(k.delta)))/20;
+  const cvd3=sum(rows.slice(-3).map(k=>k.delta));
+  const ranges=rows.slice(-14).map((k,i)=>{
+    const prev=rows[rows.length-15+i].close;
+    return Math.max(k.high-k.low,Math.abs(k.high-prev),Math.abs(k.low-prev));
+  });
+  const tol=0.3*sum(ranges)/14, mid=(c.high+c.low)/2;
+  const volumeOK=c.volume>=1.3*avgV;
+  const long=[c.low<=p.val+tol && c.close>p.val,c.delta>0 && c.delta>=avgD,
+    cvd3>0,volumeOK,c.high>c.low && c.close>=mid];
+  const short=[c.high>=p.vah-tol && c.close<p.vah,c.delta<0 && -c.delta>=avgD,
+    cvd3<0,volumeOK,c.high>c.low && c.close<=mid];
+  const L=long.filter(Boolean).length, S=short.filter(Boolean).length;
+  if (L===S) return {L,S,label:"WAIT"};
+  const buy=L>S, score=Math.max(L,S);
+  return {L,S,buy,checks:buy?long:short,label:score>=4?(buy?"BUY":"SELL"):score===3?"WATCH":"WAIT",
+    entry:c.close,stop:buy?c.low-tol:c.high+tol,tp1:p.poc,tp2:buy?p.vah:p.val};
+}
+
+function calculate() {
+  const a=snapshot?.a, capital=$("capital").valueAsNumber, risk=$("risk").valueAsNumber;
+  const distance=a && Math.abs(a.entry-a.stop);
+  const coins=capital*(risk/100)/distance, notional=coins*a?.entry;
+  $("size").textContent=!a?.checks ? "Waiting for a directional setup." :
+    !(capital>0 && risk>0 && risk<=100) ? "Enter positive capital and risk up to 100%." :
+    !(distance>0 && Number.isFinite(notional)) ? "Size unavailable for this stop distance." :
+    price(coins)+" "+snapshot.symbol.replace(/USDT$/,"")+" · $"+price(notional)+" notional";
+}
+
+function render() {
+  const a=snapshot?.a, directional=Boolean(a?.checks);
+  $("verdict").textContent=a?.label ?? "—";
+  $("verdict").style.color=({BUY:colors.up,SELL:colors.down,WATCH:colors.gold})[a?.label] || colors.dim;
+  $("summary").textContent=directional?(a.buy?"Long":"Short")+" · Closed "+new Date(snapshot.closed.at(-1).end).toLocaleTimeString():
+    a?"Tied scores · No leading side":snapshot?"No volume profile available":"Awaiting market data";
+  $("scores").textContent=a?"Long "+a.L+"/5 · Short "+a.S+"/5":"—";
+  $("checks").replaceChildren(); $("levels").replaceChildren();
+  if (directional) {
+    const labels=[a.buy?"VAL tested, close above VAL":"VAH tested, close below VAH",
+      (a.buy?"Positive":"Negative")+" delta, magnitude ≥ 20-candle average",
+      "3-candle CVD "+(a.buy?"> 0":"< 0"),"Volume ≥ 1.3 × prior average",
+      "Close in the "+(a.buy?"upper":"lower")+" half"];
+    a.checks.forEach((passed,i)=>{
+      const li=document.createElement("li");
+      li.className=passed?"yes":"no"; li.textContent=(passed?"✓ ":"✗ ")+labels[i];
+      $("checks").append(li);
+    });
+  }
+  for (const [i,name] of ["Entry","Stop loss","TP1 · POC",a?.buy===false?"TP2 · VAL":"TP2 · VA edge"].entries()) {
+    const tr=$("levels").insertRow();
+    const level=directional?[a.entry,a.stop,a.tp1,a.tp2][i]:null;
+    let ratio="—";
+    if (directional && i>=2 && a.entry!==a.stop) {
+      const reward=(level-a.entry)*(a.buy?1:-1);
+      ratio=reward>0?"1:"+Number(reward/Math.abs(a.entry-a.stop)).toFixed(2):"No reward";
+    }
+    for (const value of [directional && i===3?(a.buy?"TP2 · VAH":"TP2 · VAL"):name,
+      level===null?"—":price(level),ratio]) tr.insertCell().textContent=value;
+  }
+  $("chartTitle").textContent=$("symbol").value+" / "+$("interval").value;
+  calculate(); draw();
+}
+
+async function run(reset=false) {
+  if (busy && !reset) return;
+  const id=++generation, symbol=$("symbol").value, interval=$("interval").value;
+  busy=true;
+  if (reset) { snapshot=null; render(); }
+  $("status").textContent="Refreshing…";
+  try {
+    const candles=await load(symbol,interval);
+    if (id!==generation) return;
+    // The forming candle is visible but never enters the profile or signal.
+    const closed=candles.slice(0,-1), p=profile(closed);
+    snapshot={symbol,candles,closed,p,a:analyse(closed,p)};
+    $("status").textContent="Live • "+new Date().toLocaleTimeString();
+  } catch (error) {
+    if (id!==generation) return;
+    snapshot=null; $("status").textContent=error.message;
+  } finally {
+    if (id===generation) { busy=false; render(); }
+  }
+}
+
+function draw() {
+  const canvas=$("chart"), w=canvas.clientWidth, h=canvas.clientHeight;
+  if (!w || !h) return;
+  const dpr=window.devicePixelRatio || 1;
+  canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+  const ctx=canvas.getContext("2d");
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.font="11px ui-monospace, monospace";
+  function line(x1,y1,x2,y2,color,dash=[]) {
+    ctx.strokeStyle=color; ctx.setLineDash(dash); ctx.beginPath();
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); ctx.setLineDash([]);
+  }
+  function label(str,x,y,color) {ctx.fillStyle=color; ctx.fillText(str,x,y);}
+  if (!snapshot) { label("Awaiting market data",8,h/2,colors.dim); return; }
+  const {p,candles}=snapshot, visible=candles.slice(-80);
+  const right=w-86, plot=right*0.78, dx=plot/visible.length;
+  const top=22, bottom=h*0.71, zero=h*0.86, amp=h*0.09;
+  const lo=Math.min(...visible.map(c=>c.low),p?.low??Infinity);
+  const hi=Math.max(...visible.map(c=>c.high),p?.high??-Infinity);
+  const pad=(hi-lo)*0.035 || hi*0.0001 || 1;
+  const y=v=>top+(hi+pad-v)/(hi-lo+2*pad)*(bottom-top);
+  const maxDelta=Math.max(...visible.map(c=>Math.abs(c.delta))) || 1;
+  ctx.fillStyle="#25231b"; ctx.fillRect(plot-dx,top,dx,bottom-top);
+  for (let i=0;i<=4;i++) {
+    const yy=top+(bottom-top)*i/4;
+    line(0,yy,right,yy,"#302e26");
+  }
+  line(0,zero,plot,zero,"#575447"); label("DELTA",right+5,zero+4,colors.dim);
+  visible.forEach((c,i)=>{
+    const x=(i+0.5)*dx, bar=Math.max(1,dx*0.68);
+    const ink=c.close>=c.open?colors.up:colors.down;
+    line(x,y(c.high),x,y(c.low),ink);
+    ctx.fillStyle=ink; ctx.fillRect(x-bar/2,Math.min(y(c.open),y(c.close)),bar,Math.max(1,Math.abs(y(c.open)-y(c.close))));
+    ctx.fillStyle=c.delta>=0?colors.up:colors.down;
+    ctx.fillRect(x-bar/2,zero,bar,-c.delta/maxDelta*amp);
+  });
+  if (p) {
+    const max=Math.max(...p.bins);
+    p.bins.forEach((v,i)=>{
+      const width=(right-plot-4)*v/max, yy=y(p.low+(i+1)*p.step);
+      ctx.fillStyle="#766331"; ctx.fillRect(right-width,yy,width,Math.max(1,y(p.low+i*p.step)-yy));
+    });
+    // Stagger labels when two levels share the same pixel row.
+    let last=0;
+    const levels=[["VAH",p.vah],["POC",p.poc],["VAL",p.val]];
+    for (const [name,value] of levels) {
+      const yy=y(value), ink=name==="POC"?colors.gold:colors.dim;
+      line(0,yy,right,yy,ink,name==="POC"?[]:[4,4]);
+      last=Math.max(yy,last+13); label(name+" "+Number(value.toPrecision(7)),right+2,last+3,ink);
+    }
+  }
+  const time=c=>new Date(c.time).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+  label(time(visible[0]),2,h-3,colors.dim);
+  label(time(visible.at(-1)),Math.max(56,plot-58),h-3,colors.dim);
+}
+
+function view(learn) {
+  $("scanner").hidden=learn; $("learn").hidden=!learn;
+  $("scanTab").setAttribute("aria-pressed",String(!learn));
+  $("learnTab").setAttribute("aria-pressed",String(learn));
+  if (!learn) draw();
+}
+$("scanTab").onclick=()=>view(false); $("learnTab").onclick=()=>view(true);
+$("symbol").onchange=$("interval").onchange=()=>run(true);
+$("refresh").onclick=()=>run();
+$("capital").oninput=$("risk").oninput=calculate;
+new ResizeObserver(draw).observe($("chart"));
+window.addEventListener("resize",draw);
+render(); run(); setInterval(()=>run(),15000);
+</script></body></html>
