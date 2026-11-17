@@ -94,7 +94,7 @@ input{width:135px}output{font-variant-numeric:tabular-nums}footer{margin:20px 0}
 <article><h2>Order book / DOM</h2><p id="bookStamp"></p><div id="dom"></div><small>Top 10 bids and asks by price. Quantity in base coins.</small></article>
 <article><h2>Resting liquidity heatmap</h2><p id="depthCaption"></p><div id="depthMap"></div><small>Top 20 levels per side sampled about every 5s. Green = bids, red = asks. Brighter cells show larger visible quantities.</small></article>
 <article><h2>Time &amp; sales</h2><div id="tape"></div></article>
-<article><h2>Power trades</h2><div class="controls"><label>Minimum print (USDT)<input type="number" value="50000" min="1" id="minPrint"></label></div><div id="power"></div><small>Binance aggregate trade prints. One print can include several fills.</small></article>
+<article><h2>Power trades</h2><div class="controls"><label>Minimum print (USDT)<input type="number" value="50000" min="1" id="minPrint"></label></div><div id="power"></div><small>Trade prints from the chart exchange. Data coverage depends on stream or polling availability.</small></article>
 <article><h2>Perpetual funding &amp; open interest</h2><p id="fstats"></p><div id="oiMap"></div><div id="fundHistory" class="scroll"></div><small>Binance USDⓈ-M mark and funding. History panels identify the exchange; Bybit linear history or observed OKX swap OI can appear as labeled. OI heatmap shows open contracts over time. Funding history shows settled rates.</small></article>
 <article><h2>Reported liquidations</h2><p id="liqStatus"></p><div id="liqMap"></div><div id="liqTape"></div><small>Binance USDⓈ-M publishes sampled forced-order snapshots. Heatmap shows reported fills by time and price. Future liquidation levels are unknown.</small></article>
 <article><h2>Hypothetical leverage levels</h2><label>Assumed leverage<select id="leverage"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label><div id="scenario"></div><small>Illustration using each 5m perpetual close as an assumed entry. Green = assumed long, red = assumed short. Distance = entry / leverage. Brightness uses candle volume as a proxy. Actual positions, margin mode, fees and maintenance margin are unknown. These are simplified bankruptcy levels.</small></article>
@@ -435,12 +435,75 @@ function repeat(f,job,delay) {
   }
   tick();
 }
+
+function chartVenue(f){return f?.exchange==="okx"?"OKX USDT perpetual":"Binance USDⓈ-M perpetual";}
+async function okxData(f,path){
+  const d=await jsonFrom(["https://www.okx.com"],"/api/v5/"+path,f);
+  if(d.code!=="0"||!Array.isArray(d.data))throw Error(d.msg||"OKX data unavailable");
+  return d.data;
+}
+function okxInterval(tf){
+  if(tf==="1M")return "1Mutc";
+  if(tf.endsWith("h"))return parseInt(tf)<6?tf.toUpperCase():tf.toUpperCase()+"utc";
+  if(/[dw]$/.test(tf))return tf.toUpperCase()+"utc";
+  return tf;
+}
+async function okxHistory(f){
+  const tf=$("period").value,id=++desk.serial;
+  if(tf==="8h"){f.historyError="OKX does not provide 8h candles. Select 4h or 12h.";paintDesk();return;}
+  try{
+    const rows=await okxData(f,"market/candles?"+new URLSearchParams({instId:f.inst,bar:okxInterval(tf),limit:300}));
+    if(feed!==f||id!==desk.serial)return;
+    f.ohlc=rows.map(k=>({time:+k[0],open:+k[1],high:+k[2],low:+k[3],close:+k[4],
+      volume:+k[6],delta:NaN,end:endOf(+k[0],tf)-1})).sort((a,b)=>a.time-b.time);
+    f.historyError="";updateSeries(f);
+  }catch(e){if(feed===f){f.historyError=e.message;paintDesk();}}
+}
+async function startOKX(){
+  stopFlow();
+  const s=$("pair").value,f=feed={s,symbol:s,exchange:"okx",inst:s.replace("USDT","-USDT-SWAP"),
+    trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
+    wire:"Loading OKX trades",force:"Unavailable on fallback",bookTime:0,quotes:{},ohlc:[],started:Date.now()};
+  desk.series=[];desk.profileTrades=[];desk.marks=[];resetViewport();
+  $("venue").innerHTML='<option>OKX · USDT perpetual fallback</option>';
+  $("barPick").replaceChildren();
+  $("connectionDetails").hidden=false;
+  $("connectionDetails").textContent="Binance connection unavailable. Chart uses OKX USDT perpetual data. Scanner and paper bot require Binance history. Historical OKX candles have no taker delta; footprint and CVD use captured OKX trades.";
+  // Start history independently so contract metadata cannot delay the chart.
+  repeat(f,()=>okxHistory(f),15000);
+  repeat(f,async()=>{
+    if(!f.ctVal){
+      const instruments=await okxData(f,"public/instruments?instType=SWAP&instId="+f.inst);
+      const spec=instruments[0];
+      if(!spec||spec.ctValCcy!==s.replace("USDT","")||!(+spec.ctVal>0))throw Error("Unsupported contract units");
+      f.ctVal=+spec.ctVal;
+    }
+    try{
+      const rows=await okxData(f,"market/trades?instId="+f.inst+"&limit=500");
+      mergeTrades(f,rows.map(t=>({a:+t.tradeId,T:+t.ts,p:t.px,q:+t.sz*f.ctVal,m:t.side==="sell"})));
+      f.wire="OKX HTTP polling · "+clock(Date.now());f.tradeError=false;
+    }catch(e){f.tradeError=true;f.wire=e.message;}
+  },3000);
+  repeat(f,async()=>{
+    if(!f.ctVal)return;
+    try{
+      const rows=await okxData(f,"market/books?instId="+f.inst+"&sz=20"),b=rows[0];
+      if(!b)return;
+      const convert=rows=>rows.map(r=>[+r[0],+r[1]*f.ctVal]);
+      f.books.push({t:+b.ts,b:convert(b.bids),a:convert(b.asks)});
+      if(f.books.length>120)f.books.shift();f.bookError=false;
+    }catch{f.bookError=true;}
+  },5000);
+  f.paint=setInterval(()=>{paintFlow();},2000);paintFlow();
+}
+
 function stopFlow(){
   const f=feed;feed=null;
   if(!f)return;
   f.stop.abort();f.sockets.forEach(ws=>ws.close());f.timers.forEach(clearTimeout);clearInterval(f.paint);
 }
 function startFlow(){
+  $("venue").innerHTML='<option>Binance · USDT perpetual</option>';
   stopFlow();
   const s=$("pair").value;
   const f=feed={s,trades:new Map(),books:[],liqs:[],sockets:new Set(),timers:new Set(),stop:new AbortController(),
@@ -450,6 +513,7 @@ function startFlow(){
   const futures=(path,extra="")=>jsonFrom(FUT,path+"?symbol="+s+extra,f);
   $("barPick").replaceChildren();$("alertMsg").textContent="";$("anchor").value="";
   const stream=s.toLowerCase(),route="wss://fstream.binance.com/market/ws/";
+  schedule(f,()=>{if(!f.ohlc.length||f.historyError)startOKX();},14000);
   connectCandles(f);
   connect(f,route+stream+"@aggTrade","wire",d=>mergeTrades(f,[d]));
   connect(f,route+stream+"@markPrice@1s","markWire",d=>{
@@ -654,7 +718,7 @@ function paintFlow(){
   const trades=[...f.trades.values()].sort((a,b)=>a.id-b.id);
   if(trades.length){
     const gaps=trades.reduce((n,t,i)=>n+(i&&t.id>trades[i-1].id+1?1:0),0);
-    $("coverage").textContent="Binance USDⓈ-M perpetual"+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · stream "+f.wire+(f.tradeError?" · REST unavailable":"")+(f.historyError?" · Historical candles unavailable; live candles build from connection.":"")+". First and current bars may be partial.";
+    $("coverage").textContent=chartVenue(f)+" · "+f.s+" · "+when(trades[0].t)+" – "+clock(trades.at(-1).t)+" · "+trades.length+" retained prints · "+gaps+" ID gaps · "+(f.exchange==="okx"?"sampled trades · ":"stream ")+f.wire+(f.tradeError?" · REST unavailable":"")+(f.historyError?" · Historical candles unavailable; live candles build from connection.":"")+". First and current bars may be partial.";
     paintTrades(f,trades);
   }else{
     $("coverage").textContent=f.s+" · "+(f.tradeError?"Trade feed unavailable":"Waiting for aggregate trades")+" · stream "+f.wire;
@@ -713,6 +777,7 @@ function endOf(t,tf){
   return t+parseInt(tf)*({s:1000,m:60000,h:3600000,d:86400000,w:604800000})[tf.slice(-1)];
 }
 async function fetchHistory(f){
+  if(f.exchange==="okx")return okxHistory(f);
   const tf=$("period").value,id=++desk.serial;
   if(tf==="1s")return;
   try{
@@ -728,6 +793,7 @@ function resetViewport(){
 }
 
 function connectCandles(f){
+  if(f.exchange==="okx")return;
   if(f.klineSocket){f.sockets.delete(f.klineSocket);f.klineSocket.onclose=null;f.klineSocket.close();}
   const tf=$("period").value;
   if(tf==="1s")return;
@@ -765,7 +831,8 @@ function updateSeries(f){
   const since=range==="session"?Math.floor(now/86400000)*86400000:range==="anchor"?Date.parse($("anchor").value):range==="fixed"?now-60000*Math.max(1,$("minutes").valueAsNumber):0;
   desk.profileTrades=all.filter(t=>t.t>=since);
   for(const b of desk.series){
-    cvd+=b.delta;b.cvd=cvd;
+    if(f.exchange==="okx"){b.delta=b.prints.length?sum(b.prints.map(t=>t.buy?t.q:-t.q)):NaN;}
+    if(Number.isFinite(b.delta))cvd+=b.delta;b.cvd=Number.isFinite(b.delta)?cvd:NaN;
     for(const t of b.prints){if(!(t.t>=since))continue;
       v+=t.q;pv+=t.p*t.q;p2+=t.p*t.p*t.q;
       if(t.buy){bq+=t.q;bpv+=t.q*t.p;}else{sq+=t.q;spv+=t.q*t.p;}
@@ -804,7 +871,7 @@ function paintDesk(){
   function rect(x,y,w,h,col){c.fillStyle=col;c.fillRect(x,y,w,h);}
   function text(s,x,y,col="#c8c5b7"){c.fillStyle=col;c.fillText(s,x,y);}
   const f=feed,bs=desk.series,tf=$("period").value,on=k=>layers.has(k);
-  $("marketTitle").textContent=$("pair").value+" · "+"USDT Perpetual"+" · "+tf;
+  $("marketTitle").textContent=chartVenue(f)+" · "+$("pair").value+" · "+tf;
   if(!f||!bs.length){desk.g=null;const msg=f?.historyError||Date.now()-f?.started>12000?"Futures data unavailable. Check internet or network restrictions, then Reconnect data.":"Connecting to Binance futures…";$("ohlc").textContent=msg;$("chartNote").textContent=Date.now()-f?.started>12000?"Connection pending. Use Connection report to inspect the failed feeds.":"Live candles and trade data are loading.";text(msg,12,45);return;}
   let end=desk.end===null?bs.length-1:bs.findIndex(b=>b.time>=desk.end);if(end<0)end=bs.length-1;
   const count=desk.count,start=end-count+1,from=Math.max(0,start),visible=bs.slice(from,end+1);
@@ -871,11 +938,11 @@ function paintDesk(){
   });
   if(on("vwap"))curve(b=>b.avg,colors.gold);if(on("bands"))for(const n of [-1,1])curve(b=>b.avg+n*b.sd,"#c8aa68",[3,3]);
   if(on("side")){curve(b=>b.bv,colors.up);curve(b=>b.sv,colors.down);}
-  if(on("liq"))for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
+  if(on("liq")&&f.exchange!=="okx")for(const t of f.liqs){const xx=tx(t.t);if(Number.isFinite(xx))text(t.buy?"▼":"▲",xx,y(t.p),t.buy?colors.down:colors.up);}
   if(on("model"))for(const n of [-1,1])curve(b=>b.close*(1+n/+$("leverage").value),"#bd99e1",[3,5]);
   const last=bs[end];
   line(l,y(last.close),R,y(last.close),"#aaa691",[2,4]);
-  if(on("setup")){
+  if(on("setup")&&f.exchange!=="okx"){
     const closed=bs.slice(0,end+1).filter(b=>b.history && b.end<Date.now());
     const signal=analyse(closed,profile(closed));
     if(signal?.checks && (signal.label==="BUY"||signal.label==="SELL")){
@@ -906,7 +973,7 @@ function paintDesk(){
   if(finger&&finger.x<R&&finger.y>=top&&finger.y<=axis){line(finger.x,top,finger.x,axis,"#ada48f",[2,3]);line(l,finger.y,R,finger.y,"#ada48f",[2,3]);}
   const b=bs[hoverIndex];$("ohlc").textContent=when(b.time)+" · O "+fmt(b.open)+" H "+fmt(b.high)+" L "+fmt(b.low)+" C "+fmt(b.close)+rowText;
   $("scale").textContent=count+" bars · "+(desk.end===null?"Live edge":"Panned");
-  $("chartNote").textContent=(desk.foot?"Sell × buy rows · "+fmt(step)+" USDT per row. Blank candles have no captured trades. ":"")+(on("heat")?"Heatmap: green bids / orange asks, sampled since opening. ":"")+(on("model")?"Violet dashed = assumed leverage levels. ":"");
+  $("chartNote").textContent=(desk.foot?"Sell × buy rows · "+fmt(step)+" USDT per row. Blank candles have no captured trades. ":"")+(on("heat")?"Heatmap: green bids / orange asks, sampled since opening. ":"")+(on("model")?"Violet dashed = assumed leverage levels. ":"")+(f.exchange==="okx"?"OKX fallback · historical delta unavailable · footprint and CVD cover captured trades only.":"");
 }
 
 function queuePlot(){if(!desk.raf)desk.raf=requestAnimationFrame(()=>{desk.raf=0;paintDesk();});}
